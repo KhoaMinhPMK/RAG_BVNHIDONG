@@ -1,0 +1,123 @@
+======================================================================
+[DOWNLOADING RAG KNOWLEDGE DOCUMENTS FOR VinDr PCXR]
+======================================================================
+Output directory: E:\project\webrag\knowledge_base\downloads
+
+[1/10] Processing: WHO Pocket Book - Hospital Care for Children 2023
+  [SKIP] manual download required
+
+[2/10] Processing: BTS Paediatric Pneumonia Guidelines
+  [SKIP] manual download required
+
+[3/10] Processing: PERCH Study - WHO Chest X-ray Interpretation (Chen et al 2021)
+  [OK] ALREADY EXISTS: 03_PERCH_study_deep_learning_pediatric_CXR_Chen_2021.pdf
+
+[4/10] Processing: VinDr PCXR Dataset Paper (Nguyen et al)
+  [SKIP] manual download required
+
+[5/10] Processing: Radiographic Findings in Pediatric Pneumonia Review
+  [SKIP] manual download required
+
+[6/10] Processing: BTS Pleural Effusion Guidelines
+  [SKIP] manual download required
+
+[7/10] Processing: Fleischner Society Chest CT Glossary
+  [SKIP] manual download required
+
+[8/10] Processing: Cardiomegaly in Children - Radiopaedia Review
+  [SKIP] manual download required
+
+[9/10] Processing: Bronchial Thickening in Pediatric Pneumonia
+  [SKIP] manual download required
+
+[10/10] Processing: Reticulonodular Pattern in Pediatric Chest X-ray
+  [SKIP] manual download required
+
+
+[METADATA] Generated: E:\project\webrag\knowledge_base\downloads\metadata.json
+
+======================================================================
+[DOWNLOAD SUMMARY]
+======================================================================
+Total documents: 10
+[OK] Auto-downloaded: 1
+[SKIP] Manual required: 9
+[ERROR] Failed: 0
+
+======================================================================
+[MANUAL DOWNLOAD INSTRUCTIONS - COPY THESE LINKS TO BROWSER]
+======================================================================
+
+[01] WHO Pocket Book - Hospital Care for Children 2023
+     URL: https://www.who.int/publications/i/item/9789241549585
+     Note: WHO guidelines for childhood pneumonia diagnosis
+     Action: Open link in browser, download PDF
+     Rename: 01_WHO_Pocket_Book_-_Hospital_Care_for_Chil.pdf
+     Save to: knowledge_base/downloads/
+
+[02] BTS Paediatric Pneumonia Guidelines
+     URL: https://www.brit-thoracic.org.uk/document-library/guidelines/paediatric-pneumonia/
+     Note: British Thoracic Society guidelines
+     Action: Open link in browser, download PDF
+     Rename: 02_BTS_Paediatric_Pneumonia_Guidelines.pdf
+     Save to: knowledge_base/downloads/
+
+[04] VinDr PCXR Dataset Paper (Nguyen et al)
+     URL: https://www.nature.com/articles/s41597-023-02143-w
+     Note: Original dataset paper for VinDr PCXR - Nature Scientific Data
+     Action: Open link in browser, download PDF
+     Rename: 04_VinDr_PCXR_Dataset_Paper_(Nguyen_et_al).pdf
+     Save to: knowledge_base/downloads/
+
+[05] Radiographic Findings in Pediatric Pneumonia Review
+     URL: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7111673/
+     Note: Systematic review of radiographic findings in children
+     Action: Open link in browser, download PDF
+     Rename: 05_Radiographic_Findings_in_Pediatric_Pneum.pdf
+     Save to: knowledge_base/downloads/
+
+[06] BTS Pleural Effusion Guidelines
+     URL: https://www.brit-thoracic.org.uk/document-library/guidelines/pleural-disease/bts-pleural-disease-guideline-2023/
+     Note: Pleural effusion in children guidelines
+     Action: Open link in browser, download PDF
+     Rename: 06_BTS_Pleural_Effusion_Guidelines.pdf
+     Save to: knowledge_base/downloads/
+
+[07] Fleischner Society Chest CT Glossary
+     URL: https://pubs.rsna.org/doi/full/10.1148/rg.317115023
+     Note: Standardized terminology for chest imaging findings
+     Action: Open link in browser, download PDF
+     Rename: 07_Fleischner_Society_Chest_CT_Glossary.pdf
+     Save to: knowledge_base/downloads/
+
+[08] Cardiomegaly in Children - Radiopaedia Review
+     URL: https://radiopaedia.org/articles/cardiomegaly-1
+     Note: Comprehensive review of pediatric cardiomegaly
+     Action: Open link in browser, download PDF
+     Rename: 08_Cardiomegaly_in_Children_-_Radiopaedia_R.pdf
+     Save to: knowledge_base/downloads/
+
+[09] Bronchial Thickening in Pediatric Pneumonia
+     URL: https://radiopaedia.org/articles/bronchial-wall-thickening
+     Note: Review of bronchial wall thickening as pneumonia sign
+     Action: Open link in browser, download PDF
+     Rename: 09_Bronchial_Thickening_in_Pediatric_Pneumo.pdf
+     Save to: knowledge_base/downloads/
+
+[10] Reticulonodular Pattern in Pediatric Chest X-ray
+     URL: https://radiopaedia.org/articles/reticulonodular-pattern-chest
+     Note: Radiographic patterns in childhood pneumonia
+     Action: Open link in browser, download PDF
+     Rename: 10_Reticulonodular_Pattern_in_Pediatric_Che.pdf
+     Save to: knowledge_base/downloads/
+
+======================================================================
+[NEXT STEPS]
+======================================================================
+1. Manual download cac file con thieu theo huong dan tren
+2. Luu vao: knowledge_base/downloads/
+3. Rename theo format: {id}_{title}.pdf
+4. Chay RAG ingestion script de tao vector embeddings
+5. Test voi: curl -X POST http://localhost:3001/api/query
+
+Log written to: E:\project\webrag\knowledge_base\downloads\run_log.txt

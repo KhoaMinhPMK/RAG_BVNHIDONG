@@ -1,0 +1,91 @@
+{
+  "common": {
+    "appName": "WebRAG",
+    "subtitle": "Clinical Knowledge RAG System",
+    "search": "Search",
+    "submit": "Submit",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "view": "View",
+    "close": "Close",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "warning": "Warning",
+    "info": "Info",
+    "noData": "No data",
+    "retry": "Retry"
+  },
+  "nav": {
+    "home": "Home",
+    "query": "Knowledge Query",
+    "explain": "Explain Results",
+    "draft": "Report Draft",
+    "knowledge": "Knowledge Base",
+    "admin": "Administration"
+  },
+  "query": {
+    "title": "Knowledge Query",
+    "subtitle": "Search guidelines, SOPs, protocols and internal documents",
+    "placeholder": "Enter your question...",
+    "noResults": "No matching documents found",
+    "sources": "Sources",
+    "version": "Version"
+  },
+  "explain": {
+    "title": "Explain Model Results",
+    "subtitle": "Interpret detection results from X-ray model",
+    "uploadImage": "Upload X-ray",
+    "detectionResult": "Detection Result",
+    "explanation": "Explanation",
+    "confidence": "Confidence"
+  },
+  "draft": {
+    "title": "Report Draft",
+    "subtitle": "Create and review clinical report drafts",
+    "template": "Report Template",
+    "status": {
+      "draft": "Draft",
+      "underReview": "Under Review",
+      "edited": "Edited",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "archived": "Archived"
+    },
+    "aiDisclaimer": "AI-assisted content — requires physician approval before release"
+  },
+  "knowledge": {
+    "title": "Knowledge Base",
+    "subtitle": "Manage approved guidelines, SOPs, protocols",
+    "addDocument": "Add Document",
+    "reviewQueue": "Review Queue",
+    "status": {
+      "active": "Active",
+      "draft": "Draft",
+      "superseded": "Superseded",
+      "retired": "Retired"
+    }
+  },
+  "admin": {
+    "title": "Administration",
+    "subtitle": "System settings, RBAC, audit logs",
+    "users": "Users",
+    "roles": "Roles",
+    "auditLogs": "Audit Logs",
+    "settings": "Settings"
+  },
+  "safety": {
+    "notDiagnostic": "System is for reference only — does not replace professional decisions",
+    "humanReviewRequired": "Physician review and approval required",
+    "aiGenerated": "AI-assisted",
+    "humanVerified": "Verified by expert"
+  },
+  "roles": {
+    "clinician": "Clinician",
+    "radiologist": "Radiologist",
+    "researcher": "Researcher",
+    "admin": "Administrator"
+  }
+}

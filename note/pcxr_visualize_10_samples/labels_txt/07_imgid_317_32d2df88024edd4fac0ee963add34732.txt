@@ -1,0 +1,20 @@
+image_id: 317
+file_name: 32d2df88024edd4fac0ee963add34732.png
+width: 1280
+height: 1280
+num_annotations: 2
+
+[1]
+category_id: 35
+category_name: Reticulonodular opacity
+bbox_xywh: x=438.25, y=579.50, w=71.35, h=75.33
+bbox_xyxy: x1=438.25, y1=579.50, x2=509.60, y2=654.83
+area: 5375.02
+
+[2]
+category_id: 35
+category_name: Reticulonodular opacity
+bbox_xywh: x=458.07, y=427.85, w=70.36, h=100.11
+bbox_xyxy: x1=458.07, y1=427.85, x2=528.43, y2=527.96
+area: 7043.908
+

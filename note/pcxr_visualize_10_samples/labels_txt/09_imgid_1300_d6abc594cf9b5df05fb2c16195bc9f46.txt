@@ -1,0 +1,27 @@
+image_id: 1300
+file_name: d6abc594cf9b5df05fb2c16195bc9f46.png
+width: 1280
+height: 1280
+num_annotations: 3
+
+[1]
+category_id: 8
+category_name: Cardiomegaly
+bbox_xywh: x=404.55, y=418.98, w=535.83, h=345.56
+bbox_xyxy: x1=404.55, y1=418.98, x2=940.38, y2=764.54
+area: 185161.339
+
+[2]
+category_id: 30
+category_name: Peribronchovascular interstitial opacity
+bbox_xywh: x=281.87, y=313.20, w=208.69, h=394.93
+bbox_xyxy: x1=281.87, y1=313.20, x2=490.56, y2=708.12
+area: 82417.679
+
+[3]
+category_id: 30
+category_name: Peribronchovascular interstitial opacity
+bbox_xywh: x=728.87, y=318.84, w=256.63, h=389.28
+bbox_xyxy: x1=728.87, y1=318.84, x2=985.50, y2=708.12
+area: 99903.592
+

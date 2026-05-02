@@ -1,0 +1,24 @@
+{
+  "image": {
+    "id": 416,
+    "file_name": "42bcf79a642d33560942207cbbcccf45.png",
+    "width": 1280,
+    "height": 1280,
+    "copied_image": "06_imgid_416_42bcf79a642d33560942207cbbcccf45.png"
+  },
+  "annotations": [
+    {
+      "annotation_id": 283,
+      "category_id": 8,
+      "category_name": "Cardiomegaly",
+      "bbox_xywh": [
+        444.058,
+        427.409,
+        556.654,
+        367.304
+      ],
+      "area": 204461.37,
+      "iscrowd": 0
+    }
+  ]
+}

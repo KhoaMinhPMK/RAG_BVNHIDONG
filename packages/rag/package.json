@@ -1,0 +1,15 @@
+{
+  "name": "@webrag/rag",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@webrag/shared": "workspace:*",
+    "@webrag/db": "workspace:*",
+    "@webrag/llm": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

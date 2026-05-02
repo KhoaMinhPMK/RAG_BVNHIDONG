@@ -1,0 +1,112 @@
+[
+  {
+    "document_id": "rag-doc-01",
+    "title": "WHO Pocket Book - Hospital Care for Children 2023",
+    "note": "WHO guidelines for childhood pneumonia diagnosis",
+    "filename": "01_WHO_Pocket_Book_Hospital_Care_for_Children_2023.pdf",
+    "downloaded": false,
+    "file_size_kb": null,
+    "manual_url": "https://www.who.int/publications/i/item/9789241549585",
+    "download_url": "",
+    "tags": ["pediatric", "pneumonia", "guideline", "who"]
+  },
+  {
+    "document_id": "rag-doc-02",
+    "title": "BTS Paediatric Pneumonia Guidelines",
+    "note": "British Thoracic Society guidelines",
+    "filename": "02_BTS_Paediatric_Pneumonia_Guidelines.pdf",
+    "downloaded": false,
+    "file_size_kb": null,
+    "manual_url": "https://www.brit-thoracic.org.uk/document-library/guidelines/paediatric-pneumonia/",
+    "download_url": "",
+    "tags": ["pediatric", "pneumonia", "guideline", "bts"]
+  },
+  {
+    "document_id": "rag-doc-03",
+    "title": "PERCH Study - WHO Chest X-ray Interpretation (Chen et al 2021)",
+    "note": "Deep learning classification of pediatric CXR by WHO methodology. PLOS ONE paper.",
+    "filename": "03_PERCH_study_deep_learning_pediatric_CXR_Chen_2021.pdf",
+    "downloaded": true,
+    "file_size_kb": 1221.6,
+    "manual_url": "",
+    "download_url": "https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0253239&type=printable",
+    "tags": ["pediatric", "pneumonia", "perch", "deep-learning", "classification"]
+  },
+  {
+    "document_id": "rag-doc-04",
+    "title": "VinDr PCXR Dataset Paper (Nguyen et al)",
+    "note": "Original dataset paper for VinDr PCXR - Nature Scientific Data",
+    "filename": "04_VinDr_PCXR_Dataset_Paper_Nguyen_2023.pdf",
+    "downloaded": true,
+    "file_size_kb": 3355.0,
+    "manual_url": "",
+    "download_url": "https://www.nature.com/articles/s41597-023-02143-w.pdf",
+    "tags": ["pediatric", "vindr", "pcxr", "dataset"]
+  },
+  {
+    "document_id": "rag-doc-05",
+    "title": "Radiographic Findings in Pediatric Pneumonia Review",
+    "note": "Systematic review of radiographic findings in children",
+    "filename": "05_Radiographic_Findings_in_Pediatric_Pneumonia_Review.pdf",
+    "downloaded": false,
+    "file_size_kb": null,
+    "manual_url": "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7111673/",
+    "download_url": "",
+    "tags": ["pediatric", "pneumonia", "systematic-review", "radiographic-findings"]
+  },
+  {
+    "document_id": "rag-doc-06",
+    "title": "BTS Pleural Effusion Guidelines",
+    "note": "Pleural effusion in children guidelines",
+    "filename": "06_BTS_Pleural_Effusion_Guidelines.pdf",
+    "downloaded": false,
+    "file_size_kb": null,
+    "manual_url": "https://www.brit-thoracic.org.uk/document-library/guidelines/pleural-disease/bts-pleural-disease-guideline-2023/",
+    "download_url": "",
+    "tags": ["pediatric", "pleural-effusion", "bts", "guideline"]
+  },
+  {
+    "document_id": "rag-doc-07",
+    "title": "Fleischner Society Chest CT Glossary",
+    "note": "Standardized terminology for chest imaging findings",
+    "filename": "07_Fleischner_Society_Chest_CT_Glossary.pdf",
+    "downloaded": false,
+    "file_size_kb": null,
+    "manual_url": "https://pubs.rsna.org/doi/full/10.1148/rg.317115023",
+    "download_url": "",
+    "tags": ["fleischner", "glossary", "terminology", "chest-imaging"]
+  },
+  {
+    "document_id": "rag-doc-08",
+    "title": "Cardiomegaly in Children - Radiopaedia Review",
+    "note": "Comprehensive review of pediatric cardiomegaly",
+    "filename": "08_Cardiomegaly_in_Children_Radiopaedia_Review.pdf",
+    "downloaded": false,
+    "file_size_kb": null,
+    "manual_url": "https://radiopaedia.org/articles/cardiomegaly-1",
+    "download_url": "",
+    "tags": ["pediatric", "cardiomegaly", "radiology"]
+  },
+  {
+    "document_id": "rag-doc-09",
+    "title": "Bronchial Thickening in Pediatric Pneumonia",
+    "note": "Review of bronchial wall thickening as pneumonia sign",
+    "filename": "09_Bronchial_Thickening_in_Pediatric_Pneumonia.pdf",
+    "downloaded": false,
+    "file_size_kb": null,
+    "manual_url": "https://radiopaedia.org/articles/bronchial-wall-thickening",
+    "download_url": "",
+    "tags": ["pediatric", "bronchial-thickening", "pneumonia"]
+  },
+  {
+    "document_id": "rag-doc-10",
+    "title": "Reticulonodular Pattern in Pediatric Chest X-ray",
+    "note": "Radiographic patterns in childhood pneumonia",
+    "filename": "10_Reticulonodular_Pattern_in_Pediatric_Chest_X-ray.pdf",
+    "downloaded": false,
+    "file_size_kb": null,
+    "manual_url": "https://radiopaedia.org/articles/reticulonodular-pattern-chest",
+    "download_url": "",
+    "tags": ["pediatric", "reticulonodular", "chest-xray"]
+  }
+]

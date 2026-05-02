@@ -1,0 +1,24 @@
+{
+  "image": {
+    "id": 284,
+    "file_name": "2dd5899b11661cf3b50c0676eae17b64.png",
+    "width": 1280,
+    "height": 1280,
+    "copied_image": "08_imgid_284_2dd5899b11661cf3b50c0676eae17b64.png"
+  },
+  "annotations": [
+    {
+      "annotation_id": 185,
+      "category_id": 6,
+      "category_name": "Bronchial thickening",
+      "bbox_xywh": [
+        457.859,
+        532.002,
+        76.417,
+        65.221
+      ],
+      "area": 4983.987,
+      "iscrowd": 0
+    }
+  ]
+}

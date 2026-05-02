@@ -1,0 +1,51 @@
+======================================================================
+[DOWNLOADING RAG KNOWLEDGE DOCUMENTS FOR VinDr PCXR]
+======================================================================
+Output directory: E:\project\webrag\knowledge_base\downloads
+
+[1/10] Processing: WHO Pocket Book - Hospital Care for Children 2023
+  [SKIP] manual download required
+
+[2/10] Processing: BTS Paediatric Pneumonia Guidelines
+  [SKIP] manual download required
+
+[3/10] Processing: PERCH Study - WHO Chest X-ray Interpretation (Chen et al 2021)
+
+[4/10] Processing: VinDr PCXR Dataset Paper (Nguyen et al)
+  [SKIP] manual download required
+
+[5/10] Processing: Radiographic Findings in Pediatric Pneumonia Review
+  [SKIP] manual download required
+
+[6/10] Processing: BTS Pleural Effusion Guidelines
+  [SKIP] manual download required
+
+[7/10] Processing: Fleischner Society Chest CT Glossary
+  [SKIP] manual download required
+
+[8/10] Processing: Cardiomegaly in Children - Radiopaedia Review
+  [SKIP] manual download required
+
+[9/10] Processing: Bronchial Thickening in Pediatric Pneumonia
+  [SKIP] manual download required
+
+[10/10] Processing: Reticulonodular Pattern in Pediatric Chest X-ray
+  [SKIP] manual download required
+
+
+======================================================================
+[DOWNLOAD SUMMARY]
+======================================================================
+Total documents: 10
+[OK] Auto-downloaded: 1
+[SKIP] Manual required: 9
+[ERROR] Failed: 0
+
+======================================================================
+[NEXT STEPS]
+======================================================================
+1. Manual download cac file con thieu theo huong dan tren
+2. Luu vao: knowledge_base/downloads/
+3. Rename theo format: {id}_{title}.pdf
+4. Chay RAG ingestion script de tao vector embeddings
+5. Test voi: curl -X POST http://localhost:3001/api/query

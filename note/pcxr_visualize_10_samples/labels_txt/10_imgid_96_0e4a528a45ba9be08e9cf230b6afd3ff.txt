@@ -1,0 +1,20 @@
+image_id: 96
+file_name: 0e4a528a45ba9be08e9cf230b6afd3ff.png
+width: 1280
+height: 1280
+num_annotations: 2
+
+[1]
+category_id: 30
+category_name: Peribronchovascular interstitial opacity
+bbox_xywh: x=431.02, y=427.39, w=109.76, h=160.13
+bbox_xyxy: x1=431.02, y1=427.39, x2=540.78, y2=587.52
+area: 17575.888
+
+[2]
+category_id: 35
+category_name: Reticulonodular opacity
+bbox_xywh: x=375.08, y=461.40, w=42.07, h=130.23
+bbox_xyxy: x1=375.08, y1=461.40, x2=417.15, y2=591.63
+area: 5478.698
+

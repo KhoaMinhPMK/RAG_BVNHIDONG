@@ -1,0 +1,13 @@
+image_id: 284
+file_name: 2dd5899b11661cf3b50c0676eae17b64.png
+width: 1280
+height: 1280
+num_annotations: 1
+
+[1]
+category_id: 6
+category_name: Bronchial thickening
+bbox_xywh: x=457.86, y=532.00, w=76.42, h=65.22
+bbox_xyxy: x1=457.86, y1=532.00, x2=534.28, y2=597.22
+area: 4983.987
+

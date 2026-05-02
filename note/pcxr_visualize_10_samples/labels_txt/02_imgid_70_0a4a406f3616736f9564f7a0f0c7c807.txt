@@ -1,0 +1,13 @@
+image_id: 70
+file_name: 0a4a406f3616736f9564f7a0f0c7c807.png
+width: 1280
+height: 1280
+num_annotations: 1
+
+[1]
+category_id: 18
+category_name: Expanded edges of the anterior ribs
+bbox_xywh: x=304.64, y=390.03, w=114.33, h=110.07
+bbox_xyxy: x1=304.64, y1=390.03, x2=418.98, y2=500.10
+area: 12584.441
+

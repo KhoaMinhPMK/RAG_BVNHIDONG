@@ -1,0 +1,91 @@
+{
+  "common": {
+    "appName": "WebRAG",
+    "subtitle": "Hệ thống RAG hỗ trợ tri thức nội bộ lâm sàng",
+    "search": "Tìm kiếm",
+    "submit": "Gửi",
+    "cancel": "Hủy",
+    "save": "Lưu",
+    "delete": "Xóa",
+    "edit": "Chỉnh sửa",
+    "view": "Xem",
+    "close": "Đóng",
+    "loading": "Đang tải...",
+    "error": "Lỗi",
+    "success": "Thành công",
+    "warning": "Cảnh báo",
+    "info": "Thông tin",
+    "noData": "Không có dữ liệu",
+    "retry": "Thử lại"
+  },
+  "nav": {
+    "home": "Trang chủ",
+    "query": "Tra cứu tri thức",
+    "explain": "Giải thích kết quả",
+    "draft": "Nháp báo cáo",
+    "knowledge": "Kho tri thức",
+    "admin": "Quản trị"
+  },
+  "query": {
+    "title": "Tra cứu tri thức",
+    "subtitle": "Tìm kiếm guideline, SOP, protocol và tài liệu nội bộ",
+    "placeholder": "Nhập câu hỏi của bạn...",
+    "noResults": "Không tìm thấy tài liệu phù hợp",
+    "sources": "Nguồn tham khảo",
+    "version": "Phiên bản"
+  },
+  "explain": {
+    "title": "Giải thích kết quả mô hình",
+    "subtitle": "Diễn giải kết quả nhận diện từ model X-quang",
+    "uploadImage": "Tải ảnh X-quang",
+    "detectionResult": "Kết quả nhận diện",
+    "explanation": "Giải thích",
+    "confidence": "Độ tin cậy"
+  },
+  "draft": {
+    "title": "Nháp báo cáo",
+    "subtitle": "Tạo và rà soát nháp báo cáo lâm sàng",
+    "template": "Mẫu báo cáo",
+    "status": {
+      "draft": "Nháp",
+      "underReview": "Đang rà soát",
+      "edited": "Đã chỉnh sửa",
+      "approved": "Đã phê duyệt",
+      "rejected": "Đã từ chối",
+      "archived": "Đã lưu trữ"
+    },
+    "aiDisclaimer": "Nội dung do AI hỗ trợ sinh — cần bác sỹ xác nhận trước khi phát hành"
+  },
+  "knowledge": {
+    "title": "Kho tri thức",
+    "subtitle": "Quản lý tài liệu guideline, SOP, protocol đã phê duyệt",
+    "addDocument": "Thêm tài liệu",
+    "reviewQueue": "Hàng chờ duyệt",
+    "status": {
+      "active": "Hiệu lực",
+      "draft": "Nháp",
+      "superseded": "Đã thay thế",
+      "retired": "Ngừng hiệu lực"
+    }
+  },
+  "admin": {
+    "title": "Quản trị",
+    "subtitle": "Cài đặt hệ thống, phân quyền, audit logs",
+    "users": "Người dùng",
+    "roles": "Vai trò",
+    "auditLogs": "Nhật ký truy cập",
+    "settings": "Cài đặt"
+  },
+  "safety": {
+    "notDiagnostic": "Hệ thống chỉ hỗ trợ tham khảo, không thay thế quyết định chuyên môn",
+    "humanReviewRequired": "Yêu cầu bác sỹ rà soát và phê duyệt",
+    "aiGenerated": "AI hỗ trợ sinh",
+    "humanVerified": "Đã xác nhận bởi chuyên gia"
+  },
+  "roles": {
+    "clinician": "Bác sỹ lâm sàng",
+    "radiologist": "Bác sỹ chẩn đoán hình ảnh",
+    "researcher": "Nghiên cứu viên",
+    "admin": "Quản trị viên"
+  }
+}

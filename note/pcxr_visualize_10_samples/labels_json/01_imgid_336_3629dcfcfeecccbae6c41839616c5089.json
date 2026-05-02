@@ -1,0 +1,24 @@
+{
+  "image": {
+    "id": 336,
+    "file_name": "3629dcfcfeecccbae6c41839616c5089.png",
+    "width": 1280,
+    "height": 1280,
+    "copied_image": "01_imgid_336_3629dcfcfeecccbae6c41839616c5089.png"
+  },
+  "annotations": [
+    {
+      "annotation_id": 231,
+      "category_id": 30,
+      "category_name": "Peribronchovascular interstitial opacity",
+      "bbox_xywh": [
+        726.75,
+        482.475,
+        160.589,
+        178.698
+      ],
+      "area": 28696.831,
+      "iscrowd": 0
+    }
+  ]
+}

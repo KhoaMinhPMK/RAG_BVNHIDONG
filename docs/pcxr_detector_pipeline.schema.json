@@ -1,0 +1,598 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/pcxr_detector_pipeline.schema.json",
+  "title": "PCXR Detector to LLM Pipeline Contract",
+  "description": "End-to-end contract for raw PCXR detector output, post-processing trace, and llm_ready_payload.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "pipeline_run_id",
+    "task",
+    "image_id",
+    "generated_at",
+    "detector_output",
+    "post_processing",
+    "llm_ready_payload"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "pcxr-detector-pipeline/v1"
+    },
+    "pipeline_run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task": {
+      "type": "string",
+      "const": "pcxr_detection"
+    },
+    "image_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "episode_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "detector_output": {
+      "$ref": "#/$defs/detectorOutput"
+    },
+    "post_processing": {
+      "$ref": "#/$defs/postProcessing"
+    },
+    "llm_ready_payload": {
+      "$ref": "#/$defs/llmReadyPayload"
+    }
+  },
+  "$defs": {
+    "bbox": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "prefixItems": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "number",
+          "minimum": 0
+        }
+      ]
+    },
+    "canonicalLabel": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "detection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bbox",
+        "label",
+        "score"
+      ],
+      "properties": {
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "label_id": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "detectorOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_name",
+        "model_version",
+        "detections"
+      ],
+      "properties": {
+        "model_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "framework": {
+          "type": "string"
+        },
+        "image_width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "image_height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "detections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/detection"
+          }
+        }
+      }
+    },
+    "anatomy": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "available",
+            "unavailable"
+          ]
+        },
+        "laterality": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "left",
+            "right",
+            "bilateral",
+            null
+          ]
+        },
+        "zone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "retainedDetection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finding_id",
+        "source_label",
+        "label_code",
+        "display_label",
+        "score",
+        "bbox",
+        "rank",
+        "reportable",
+        "anatomy",
+        "flags"
+      ],
+      "properties": {
+        "finding_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label_code": {
+          "$ref": "#/$defs/canonicalLabel"
+        },
+        "display_label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        },
+        "rank": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reportable": {
+          "type": "boolean"
+        },
+        "anatomy": {
+          "$ref": "#/$defs/anatomy"
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "droppedDetection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_label",
+        "score",
+        "bbox",
+        "drop_reason"
+      ],
+      "properties": {
+        "source_label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        },
+        "drop_reason": {
+          "type": "string",
+          "enum": [
+            "below_threshold",
+            "invalid_bbox",
+            "unknown_label",
+            "duplicate_overlap"
+          ]
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "abnormality_present",
+        "finding_count",
+        "top_finding",
+        "max_score",
+        "label_counts",
+        "note"
+      ],
+      "properties": {
+        "abnormality_present": {
+          "type": "boolean"
+        },
+        "finding_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "top_finding": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_score": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "label_counts": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z0-9_]+$"
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requires_human_review",
+        "low_confidence",
+        "flags"
+      ],
+      "properties": {
+        "requires_human_review": {
+          "type": "boolean"
+        },
+        "low_confidence": {
+          "type": "boolean"
+        },
+        "multi_finding_case": {
+          "type": "boolean"
+        },
+        "ood_flag": {
+          "type": "boolean"
+        },
+        "image_quality_flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "postProcessing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "processor_name",
+        "processor_version",
+        "label_map_version",
+        "threshold_policy_version",
+        "steps_applied",
+        "raw_detection_count",
+        "retained_detection_count",
+        "dropped_detection_count",
+        "retained_detections",
+        "dropped_detections",
+        "summary",
+        "safety"
+      ],
+      "properties": {
+        "processor_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "processor_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label_map_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "threshold_policy_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "steps_applied": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "adapt_raw_output",
+              "validate_input",
+              "canonicalize_label",
+              "filter_by_threshold",
+              "deduplicate_overlap",
+              "rank_detections",
+              "derive_summary",
+              "derive_safety",
+              "assemble_llm_payload"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "raw_detection_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "retained_detection_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped_detection_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "retained_detections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/retainedDetection"
+          }
+        },
+        "dropped_detections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/droppedDetection"
+          }
+        },
+        "summary": {
+          "$ref": "#/$defs/summary"
+        },
+        "safety": {
+          "$ref": "#/$defs/safety"
+        }
+      }
+    },
+    "sourceModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_name",
+        "model_version",
+        "pipeline_run_id"
+      ],
+      "properties": {
+        "model_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pipeline_run_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finding_id",
+        "label",
+        "label_code",
+        "score",
+        "bbox",
+        "rank",
+        "anatomy",
+        "flags"
+      ],
+      "properties": {
+        "finding_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label_code": {
+          "$ref": "#/$defs/canonicalLabel"
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        },
+        "rank": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "anatomy": {
+          "$ref": "#/$defs/anatomy"
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "usageGuardrails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed_use",
+        "forbidden_use"
+      ],
+      "properties": {
+        "allowed_use": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "explanation_drafting",
+              "report_drafting"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "forbidden_use": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "final_diagnosis",
+              "treatment_recommendation",
+              "discharge_decision"
+            ]
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "llmReadyPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "image_id",
+        "generated_at",
+        "source_model",
+        "prediction_summary",
+        "findings",
+        "safety",
+        "usage_guardrails"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "pcxr-llm-ready-payload/v1"
+        },
+        "image_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "episode_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "generated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source_model": {
+          "$ref": "#/$defs/sourceModel"
+        },
+        "prediction_summary": {
+          "$ref": "#/$defs/summary"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        },
+        "safety": {
+          "$ref": "#/$defs/safety"
+        },
+        "usage_guardrails": {
+          "$ref": "#/$defs/usageGuardrails"
+        }
+      }
+    }
+  }
+}

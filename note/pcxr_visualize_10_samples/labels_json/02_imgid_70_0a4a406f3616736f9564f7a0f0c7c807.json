@@ -1,0 +1,24 @@
+{
+  "image": {
+    "id": 70,
+    "file_name": "0a4a406f3616736f9564f7a0f0c7c807.png",
+    "width": 1280,
+    "height": 1280,
+    "copied_image": "02_imgid_70_0a4a406f3616736f9564f7a0f0c7c807.png"
+  },
+  "annotations": [
+    {
+      "annotation_id": 56,
+      "category_id": 18,
+      "category_name": "Expanded edges of the anterior ribs",
+      "bbox_xywh": [
+        304.643,
+        390.031,
+        114.334,
+        110.068
+      ],
+      "area": 12584.441,
+      "iscrowd": 0
+    }
+  ]
+}

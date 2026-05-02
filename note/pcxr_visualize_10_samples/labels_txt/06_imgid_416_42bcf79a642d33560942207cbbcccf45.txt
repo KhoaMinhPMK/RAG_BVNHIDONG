@@ -1,0 +1,13 @@
+image_id: 416
+file_name: 42bcf79a642d33560942207cbbcccf45.png
+width: 1280
+height: 1280
+num_annotations: 1
+
+[1]
+category_id: 8
+category_name: Cardiomegaly
+bbox_xywh: x=444.06, y=427.41, w=556.65, h=367.30
+bbox_xyxy: x1=444.06, y1=427.41, x2=1000.71, y2=794.71
+area: 204461.37
+

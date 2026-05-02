@@ -1,0 +1,20 @@
+image_id: 660
+file_name: 6ed015598fa61f9a4c28a94cfe39ac75.png
+width: 1280
+height: 1280
+num_annotations: 2
+
+[1]
+category_id: 30
+category_name: Peribronchovascular interstitial opacity
+bbox_xywh: x=506.82, y=436.63, w=95.34, h=321.31
+bbox_xyxy: x1=506.82, y1=436.63, x2=602.16, y2=757.94
+area: 30632.528
+
+[2]
+category_id: 30
+category_name: Peribronchovascular interstitial opacity
+bbox_xywh: x=799.36, y=534.59, w=116.23, h=239.03
+bbox_xyxy: x1=799.36, y1=534.59, x2=915.59, y2=773.61
+area: 27782.157
+

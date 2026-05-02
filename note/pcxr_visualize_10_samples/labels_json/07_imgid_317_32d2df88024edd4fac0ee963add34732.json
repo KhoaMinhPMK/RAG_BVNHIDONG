@@ -1,0 +1,37 @@
+{
+  "image": {
+    "id": 317,
+    "file_name": "32d2df88024edd4fac0ee963add34732.png",
+    "width": 1280,
+    "height": 1280,
+    "copied_image": "07_imgid_317_32d2df88024edd4fac0ee963add34732.png"
+  },
+  "annotations": [
+    {
+      "annotation_id": 213,
+      "category_id": 35,
+      "category_name": "Reticulonodular opacity",
+      "bbox_xywh": [
+        438.248,
+        579.498,
+        71.352,
+        75.331
+      ],
+      "area": 5375.02,
+      "iscrowd": 0
+    },
+    {
+      "annotation_id": 214,
+      "category_id": 35,
+      "category_name": "Reticulonodular opacity",
+      "bbox_xywh": [
+        458.068,
+        427.845,
+        70.361,
+        100.111
+      ],
+      "area": 7043.908,
+      "iscrowd": 0
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "image": {
+    "id": 1300,
+    "file_name": "d6abc594cf9b5df05fb2c16195bc9f46.png",
+    "width": 1280,
+    "height": 1280,
+    "copied_image": "09_imgid_1300_d6abc594cf9b5df05fb2c16195bc9f46.png"
+  },
+  "annotations": [
+    {
+      "annotation_id": 846,
+      "category_id": 8,
+      "category_name": "Cardiomegaly",
+      "bbox_xywh": [
+        404.549,
+        418.981,
+        535.831,
+        345.559
+      ],
+      "area": 185161.339,
+      "iscrowd": 0
+    },
+    {
+      "annotation_id": 847,
+      "category_id": 30,
+      "category_name": "Peribronchovascular interstitial opacity",
+      "bbox_xywh": [
+        281.871,
+        313.198,
+        208.692,
+        394.925
+      ],
+      "area": 82417.679,
+      "iscrowd": 0
+    },
+    {
+      "annotation_id": 848,
+      "category_id": 30,
+      "category_name": "Peribronchovascular interstitial opacity",
+      "bbox_xywh": [
+        728.868,
+        318.84,
+        256.635,
+        389.283
+      ],
+      "area": 99903.592,
+      "iscrowd": 0
+    }
+  ]
+}

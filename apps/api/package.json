@@ -29,7 +29,7 @@
     "pdf-parse": "1.1.1",
     "tiktoken": "^1.0.22",
     "uuid": "^14.0.0",
-    "winston": "^3.17.0",
+    "winston": "^3.19.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {

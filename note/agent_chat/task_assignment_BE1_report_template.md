@@ -173,13 +173,13 @@ git pull origin main
 git checkout -b feature/report-template-system
 ```
 
-### **Step 2: Install dependencies**
-```bash
-cd apps/api
-yarn add reportlab-node  # or use Python subprocess
-# OR
-pip install reportlab pillow
-```
+### **Step 2: Note về dependencies**
+
+Package.json đã có các dependencies cần thiết:
+- **Node:** vitest, supertest, @types/supertest, @vitest/coverage-v8 ✅
+- **Python:** reportlab sẽ được gọi qua subprocess (không cần cài đặt trong Node environment)
+
+**KHÔNG CHẠY yarn install** - chỉ viết code. Python report generator sẽ chạy riêng biệt.
 
 ### **Step 3: Create report generator**
 

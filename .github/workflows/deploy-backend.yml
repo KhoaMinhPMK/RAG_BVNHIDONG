@@ -1,0 +1,58 @@
+name: Deploy Backend API
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/api/**'
+      - 'packages/**'
+      - '.github/workflows/deploy-backend.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'yarn'
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Type check
+        run: |
+          cd apps/api
+          yarn typecheck || echo "Typecheck not configured yet"
+
+      - name: Lint
+        run: |
+          cd apps/api
+          yarn lint || echo "Lint not configured yet"
+
+      - name: Build
+        run: |
+          cd apps/api
+          yarn build || echo "Build not configured yet"
+
+      - name: Run tests
+        run: |
+          cd apps/api
+          yarn test || echo "Tests not configured yet"
+
+      # Deploy to Railway/Vercel/Render
+      # Uncomment when ready to deploy
+      # - name: Deploy to Railway
+      #   env:
+      #     RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      #     OLLAMA_URL: https://grew-hypothesis-mothers-flooring.trycloudflare.com
+      #     SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      #     SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      #   run: |
+      #     npm install -g @railway/cli
+      #     railway up

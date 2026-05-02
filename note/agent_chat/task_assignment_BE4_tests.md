@@ -52,11 +52,14 @@ git pull origin main
 git checkout -b feature/backend-unit-tests
 ```
 
-### **Step 2: Install dependencies**
-```bash
-cd apps/api
-yarn add -D vitest supertest @types/supertest @vitest/coverage-v8
-```
+### **Step 2: Check existing dependencies**
+Packages đã có sẵn trong `apps/api/package.json`:
+- vitest ✅
+- supertest ✅
+- @types/supertest ✅
+- @vitest/coverage-v8 ✅
+
+**KHÔNG CẦN CHẠY yarn install** - chỉ viết code test.
 
 ### **Step 3: Create vitest config**
 

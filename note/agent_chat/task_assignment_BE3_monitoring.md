@@ -71,10 +71,11 @@ mkdir -p monitoring
 Create Jupyter notebook with this content:
 
 ```python
-# Cell 1: Install dependencies
-!pip install gpustat pandas matplotlib
-
-# Cell 2: Import libraries
+# Cell 1: Import libraries
+# Note: gpustat, pandas, matplotlib should be pre-installed in A100 JupyterLab
+import subprocess
+import json
+import time
 import subprocess
 import json
 import time

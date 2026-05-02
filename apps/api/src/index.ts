@@ -21,6 +21,7 @@ import draftRoutes from './routes/draft.js';
 import episodesRoutes from './routes/episodes.js';
 import uploadRoutes from './routes/upload.js';
 import detectRoutes from './routes/detect.js';
+import documentsRoutes from './routes/documents.js';
 
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
@@ -95,6 +96,10 @@ app.get('/api', (req: Request, res: Response) => {
       upload: 'POST /api/episodes/upload',
       triggerDetection: 'POST /api/detect',
       detectionStatus: 'GET /api/detect/:id',
+      documents: 'GET /api/documents',
+      documentDetail: 'GET /api/documents/:id',
+      deleteDocument: 'DELETE /api/documents/:id',
+      reingestDocument: 'POST /api/documents/:id/reingest',
     },
   });
 });
@@ -106,6 +111,7 @@ app.use('/api', draftRoutes);
 app.use('/api', episodesRoutes);
 app.use('/api', uploadRoutes);
 app.use('/api', detectRoutes);
+app.use('/api/documents', documentsRoutes);
 
 // ============================================================================
 // Error Handler
@@ -132,30 +138,33 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 // Start Server
 // ============================================================================
 
-app.listen(PORT, async () => {
-  logger.info(`🚀 API Server running on http://localhost:${PORT}`);
-  logger.info(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
-  logger.info(`🔗 CORS origin: ${CORS_ORIGIN}`);
+// Only start server if not in test environment
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, async () => {
+    logger.info(`🚀 API Server running on http://localhost:${PORT}`);
+    logger.info(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
+    logger.info(`🔗 CORS origin: ${CORS_ORIGIN}`);
 
-  // Test connections on startup
-  logger.info('Testing connections...');
-  const supabaseOk = await testSupabaseConnection();
+    // Test connections on startup
+    logger.info('Testing connections...');
+    const supabaseOk = await testSupabaseConnection();
 
-  // Lazy import ollamaClient AFTER env vars are loaded
-  const { ollamaClient } = await import('./lib/ollama/client.js');
-  const ollamaOk = await ollamaClient.testConnection();
+    // Lazy import ollamaClient AFTER env vars are loaded
+    const { ollamaClient } = await import('./lib/ollama/client.js');
+    const ollamaOk = await ollamaClient.testConnection();
 
-  if (!supabaseOk) {
-    logger.warn('⚠️  Supabase connection failed - some features may not work');
-  }
+    if (!supabaseOk) {
+      logger.warn('⚠️  Supabase connection failed - some features may not work');
+    }
 
-  if (!ollamaOk) {
-    logger.warn('⚠️  Ollama connection failed - AI features will not work');
-  }
+    if (!ollamaOk) {
+      logger.warn('⚠️  Ollama connection failed - AI features will not work');
+    }
 
-  if (supabaseOk && ollamaOk) {
-    logger.info('✅ All services connected successfully');
-  }
-});
+    if (supabaseOk && ollamaOk) {
+      logger.info('✅ All services connected successfully');
+    }
+  });
+}
 
 export default app;

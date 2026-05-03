@@ -13,8 +13,9 @@ import {
 import { PageTransition } from '@/components/ui/page-transition';
 import { DetectionSkeleton, ExplanationSkeleton, DraftSkeleton } from '@/components/ui/loading-skeleton';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
-import { getEpisodeDetail } from '@/lib/api/client';
+import { getEpisodeDetail, explainDetection, queryKnowledge, generateDraft } from '@/lib/api/client';
 import { motion } from 'framer-motion';
+import { CAEDock } from '@/components/cae/CAEDock';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 type Step = 'detection' | 'explain' | 'draft';
@@ -25,6 +26,8 @@ interface DraftField {
   modified: boolean; type: 'ai' | 'required' | 'readonly'; rows: number;
 }
 interface PendingChange { fieldKey: string; newValue: string; label: string; }
+interface Citation { num: number; ref: string; section: string; passage: string; confidence: number; }
+interface CaseInfo { patientRef: string; age: string; gender: string; date: string; symptoms: string; spo2: string; crp: string; }
 
 interface PcxrAnnotation {
   id: number;
@@ -99,11 +102,11 @@ function catShort(categoryId: number, fallback: string) {
   return CAT_SHORT[categoryId] ?? fallback.slice(0, 28);
 }
 
-// ─── Mock case meta (patient info, stays constant) ─────────────────────────
-const MOCK_CASE = {
-  patientRef: 'BN-2024-010', age: '3 tuổi', gender: 'Nam',
-  date: '01/05/2024', symptoms: 'Sốt 3 ngày, ho, thở nhanh',
-  spo2: '94%', crp: '45.2 mg/L',
+// ─── Default case info (used as fallback before episode loads) ─────────────
+const DEFAULT_CASE_INFO: CaseInfo = {
+  patientRef: '—', age: '—', gender: '—',
+  date: '—', symptoms: '—',
+  spo2: '—', crp: '—',
 };
 
 // ─── Episode to Sample mapping ─────────────────────────────────────────────
@@ -201,8 +204,8 @@ function TextWithCitations({ text, onCitationClick }: { text: string; onCitation
 }
 
 // ─── Citation popup ─────────────────────────────────────────────────────────
-function CitationPopup({ num, onClose }: { num: number; onClose: () => void }) {
-  const c = CITATIONS_DATA.find(x => x.num === num);
+function CitationPopup({ num, citations, onClose }: { num: number; citations: Citation[]; onClose: () => void }) {
+  const c = citations.find(x => x.num === num);
   if (!c) return null;
   return (
     <>
@@ -428,10 +431,10 @@ function XrayViewport({
 
 // ─── Image panel ───────────────────────────────────────────────────────────
 function ImagePanel({
-  widthPct, sample,
+  widthPct, sample, caseInfo,
   hoveredIdx, onHoverIdx, focusedIdx, onFocusIdx, onFullscreen,
 }: {
-  widthPct: number; sample: PcxrSample;
+  widthPct: number; sample: PcxrSample; caseInfo: CaseInfo;
   hoveredIdx: number | null; onHoverIdx: (i: number | null) => void;
   focusedIdx: number | null; onFocusIdx: (i: number | null) => void;
   onFullscreen: () => void;
@@ -501,11 +504,11 @@ function ImagePanel({
         {infoOpen && (
           <div className="px-3 pb-2.5 grid grid-cols-2 gap-x-4 gap-y-2">
             {[
-              { icon: User,         v: `${MOCK_CASE.age} · ${MOCK_CASE.gender}`, l: 'BN' },
-              { icon: Calendar,     v: MOCK_CASE.date,                            l: 'Ngày' },
-              { icon: Activity,     v: MOCK_CASE.spo2,                            l: 'SpO₂' },
-              { icon: FlaskConical, v: MOCK_CASE.crp,                             l: 'CRP' },
-              { icon: Stethoscope,  v: MOCK_CASE.symptoms,                        l: 'T/c' },
+              { icon: User,         v: `${caseInfo.age} · ${caseInfo.gender}`, l: 'BN' },
+              { icon: Calendar,     v: caseInfo.date,                           l: 'Ngày' },
+              { icon: Activity,     v: caseInfo.spo2,                           l: 'SpO₂' },
+              { icon: FlaskConical, v: caseInfo.crp,                            l: 'CRP' },
+              { icon: Stethoscope,  v: caseInfo.symptoms,                       l: 'T/c' },
             ].map(f => (
               <div key={f.l} className="flex items-start gap-1.5 min-w-0">
                 <f.icon className="w-3 h-3 text-text-tertiary mt-0.5 shrink-0" />
@@ -523,8 +526,8 @@ function ImagePanel({
 }
 
 // ─── Fullscreen viewer ─────────────────────────────────────────────────────
-function FullscreenViewer({ sample, hoveredIdx, onHoverIdx, onClose }: {
-  sample: PcxrSample; hoveredIdx: number | null; onHoverIdx: (i: number | null) => void; onClose: () => void;
+function FullscreenViewer({ sample, caseInfo, hoveredIdx, onHoverIdx, onClose }: {
+  sample: PcxrSample; caseInfo: CaseInfo; hoveredIdx: number | null; onHoverIdx: (i: number | null) => void; onClose: () => void;
 }) {
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
 
@@ -539,7 +542,7 @@ function FullscreenViewer({ sample, hoveredIdx, onHoverIdx, onClose }: {
       <div className="flex items-center justify-between px-5 py-2 border-b border-zinc-800 shrink-0 animate-slide-down">
         <div className="flex items-center gap-4">
           <span className="text-sm font-mono text-zinc-200">{sample.imageId}</span>
-          <span className="text-xs text-zinc-500">{MOCK_CASE.age} · {MOCK_CASE.gender} · {MOCK_CASE.date}</span>
+          <span className="text-xs text-zinc-500">{caseInfo.age} · {caseInfo.gender} · {caseInfo.date}</span>
         </div>
         <button onClick={onClose} className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-200 border border-zinc-700 hover:border-zinc-500 rounded-sm px-2.5 py-1 transition-colors">
           <span>Esc</span><X className="w-3.5 h-3.5" />
@@ -651,7 +654,7 @@ function DetectionPanel({ sample, hoveredIdx, onHoverIdx, focusedIdx, onFocusIdx
         </button>
         <button onClick={onNext}
           className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-brand-primary text-white text-xs font-semibold rounded-sm hover:opacity-90 transition-opacity">
-          Yêu cầu giải thích lâm sàng <ChevronRight className="w-3.5 h-3.5" />
+          Yêu cầu CAE giải thích <ChevronRight className="w-3.5 h-3.5" />
         </button>
       </div>
     </div>
@@ -659,36 +662,94 @@ function DetectionPanel({ sample, hoveredIdx, onHoverIdx, focusedIdx, onFocusIdx
 }
 
 // ─── Step 2: Explain ───────────────────────────────────────────────────────
-function ExplainPanel({ onNext, onCitation }: { onNext: () => void; onCitation: (n: number) => void }) {
+function ExplainPanel({
+  episodeId, sample, onNext, onCitation, onCitationsLoaded,
+}: {
+  episodeId: string;
+  sample: PcxrSample;
+  onNext: () => void;
+  onCitation: (n: number) => void;
+  onCitationsLoaded: (cits: Citation[]) => void;
+}) {
   const [status, setStatus] = useState<'idle' | 'streaming' | 'done'>('idle');
   const [text, setText] = useState('');
   const [feedback, setFeedback] = useState<'accepted' | 'rejected' | null>(null);
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [liveCitations, setLiveCitations] = useState<Citation[]>([]);
+  const [llmProvider, setLlmProvider] = useState<'ollama' | 'mimo'>('mimo');
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs]);
 
-  const handleRun = () => { setStatus('streaming'); setText(''); streamText(EXPLANATION_TEXT, setText, () => setStatus('done')); };
-  const handleSend = () => {
+  const handleRun = async () => {
+    setStatus('streaming'); setText('');
+    try {
+      const res = await explainDetection(episodeId, {
+        image_id: sample.imageId,
+        detections: sample.annotations.map(a => ({ bbox: a.bbox, label: a.category, score: mockScore(a.id) })),
+      });
+      if (res.success) {
+        const mapped: Citation[] = (res.citations ?? []).map((c: any, i: number) => ({
+          num: i + 1,
+          ref: `${c.document_title ?? ''} ${c.version ?? ''}`.trim(),
+          section: c.effective_date ?? '',
+          passage: c.excerpt ?? '',
+          confidence: 0.8,
+        }));
+        setLiveCitations(mapped);
+        onCitationsLoaded(mapped);
+        streamText(res.explanation ?? EXPLANATION_TEXT, setText, () => setStatus('done'));
+      } else {
+        streamText(EXPLANATION_TEXT, setText, () => setStatus('done'));
+      }
+    } catch {
+      streamText(EXPLANATION_TEXT, setText, () => setStatus('done'));
+    }
+  };
+
+  const handleSend = async () => {
     const q = input.trim(); if (!q) return;
     setInput(''); setMsgs(m => [...m, { role: 'user', content: q }]); setLoading(true);
-    setTimeout(() => { setMsgs(m => [...m, { role: 'assistant', content: getKnowledgeReply(q) }]); setLoading(false); }, 1300);
+    try {
+      const res = await queryKnowledge(q, episodeId, llmProvider);
+      const answer = res.success && res.answer ? res.answer : getKnowledgeReply(q);
+      setMsgs(m => [...m, { role: 'assistant', content: answer }]);
+    } catch {
+      setMsgs(m => [...m, { role: 'assistant', content: getKnowledgeReply(q) }]);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const displayCitations = liveCitations.length > 0 ? liveCitations : CITATIONS_DATA;
 
   return (
     <div className="flex flex-col gap-3 flex-1 min-h-0">
       <div className="border border-border rounded-sm bg-surface flex flex-col flex-1 min-h-0">
         <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
-          <span className="text-xs font-semibold text-text-primary">Giải thích lâm sàng</span>
-          {status === 'streaming' && <div className="flex items-center gap-1.5 text-[10px] text-text-tertiary"><Loader2 className="w-3 h-3 animate-spin" />Đang tạo...</div>}
-          {status === 'done' && <span className="text-[10px] text-text-tertiary font-mono">qwen2.5:7b · nhấn <span className="text-brand-primary font-bold">[N]</span> xem nguồn</span>}
+          <span className="text-xs font-semibold text-text-primary">CAE giải thích lâm sàng</span>
+          <div className="flex items-center gap-2">
+            {/* Provider toggle */}
+            <div className="flex items-center border border-border rounded-sm overflow-hidden">
+              <button onClick={() => setLlmProvider('ollama')}
+                className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${llmProvider === 'ollama' ? 'bg-brand-primary text-white' : 'bg-surface text-text-tertiary hover:bg-background-secondary'}`}>
+                Ollama
+              </button>
+              <button onClick={() => setLlmProvider('mimo')}
+                className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${llmProvider === 'mimo' ? 'bg-brand-primary text-white' : 'bg-surface text-text-tertiary hover:bg-background-secondary'}`}>
+                MiMo
+              </button>
+            </div>
+            {status === 'streaming' && <div className="flex items-center gap-1.5 text-[10px] text-text-tertiary"><Loader2 className="w-3 h-3 animate-spin" />Đang tạo...</div>}
+            {status === 'done' && <span className="text-[10px] text-text-tertiary font-mono">{llmProvider === 'mimo' ? 'mimo-v2.5-pro' : 'qwen2.5:7b'} · nhấn <span className="text-brand-primary font-bold">[N]</span> xem nguồn</span>}
+          </div>
         </div>
         {status === 'idle' ? (
           <div className="flex-1 flex flex-col items-center justify-center p-6 gap-3">
             <Play className="w-8 h-8 text-text-tertiary" />
             <button onClick={handleRun} className="flex items-center gap-2 px-4 py-2 bg-brand-primary text-white text-xs font-semibold rounded-sm hover:opacity-90">
-              <Play className="w-3.5 h-3.5" />Chạy Explainer Agent
+              <Play className="w-3.5 h-3.5" />Chạy CAE giải thích
             </button>
           </div>
         ) : status === 'streaming' ? (
@@ -706,7 +767,7 @@ function ExplainPanel({ onNext, onCitation }: { onNext: () => void; onCitation: 
               <div className="mt-4 pt-3 border-t border-border">
                 <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wider mb-2">Nguồn — nhấn để đọc</p>
                 <div className="space-y-1.5">
-                  {CITATIONS_DATA.map(c => (
+                  {displayCitations.map(c => (
                     <button key={c.num} onClick={() => onCitation(c.num)}
                       className="w-full flex items-start gap-2 p-2 rounded-sm bg-background-secondary border border-border hover:border-brand-primary/50 hover:bg-brand-light/10 transition-colors text-left">
                       <span className="text-[10px] font-bold text-brand-primary w-5 shrink-0">[{c.num}]</span>
@@ -741,8 +802,8 @@ function ExplainPanel({ onNext, onCitation }: { onNext: () => void; onCitation: 
         <div className="border border-border rounded-sm bg-surface flex flex-col shrink-0" style={{ maxHeight: 220 }}>
           <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border shrink-0">
             <BookOpen className="w-3.5 h-3.5 text-text-tertiary" />
-            <span className="text-xs font-semibold text-text-primary">Hỏi thêm</span>
-            <span className="text-[10px] text-text-tertiary ml-1">Knowledge Agent</span>
+            <span className="text-xs font-semibold text-text-primary">Hỏi thêm CAE</span>
+            <span className="text-[10px] text-text-tertiary ml-1">RAG theo ca</span>
           </div>
           <div className="flex-1 overflow-y-auto p-2.5 space-y-2 min-h-0">
             {msgs.length === 0 && (
@@ -778,7 +839,7 @@ function ExplainPanel({ onNext, onCitation }: { onNext: () => void; onCitation: 
 }
 
 // ─── Step 3: Draft ─────────────────────────────────────────────────────────
-function DraftPanel() {
+function DraftPanel({ episodeId, sample }: { episodeId: string; sample: PcxrSample }) {
   const [status, setStatus] = useState<'idle' | 'generating' | 'done'>('idle');
   const [genText, setGenText] = useState('');
   const [fields, setFields] = useState<DraftField[]>(INITIAL_DRAFT);
@@ -790,8 +851,30 @@ function DraftPanel() {
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs]);
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     setStatus('generating');
+    try {
+      const res = await generateDraft(episodeId, 'default', {
+        image_id: sample.imageId,
+        detections: sample.annotations.map(a => ({ bbox: a.bbox, label: a.category, score: mockScore(a.id) })),
+      });
+      if (res.success && res.fields) {
+        const mappedFields: DraftField[] = (res.fields ?? []).map((f: any) => ({
+          key: f.field_id,
+          label: f.label,
+          value: f.value ?? '',
+          modified: false,
+          type: f.source === 'locked' ? 'readonly' : f.source === 'ai' ? 'ai' : 'required',
+          rows: f.value && f.value.length > 80 ? 3 : 2,
+        }));
+        if (mappedFields.length > 0) {
+          const preview = mappedFields.filter(f => f.type === 'ai').map(f => `${f.label}:\n${f.value}`).join('\n\n');
+          streamText(preview, setGenText, () => { setStatus('done'); setGenText(''); setFields(mappedFields); });
+          return;
+        }
+      }
+    } catch { /* fall through to mock */ }
+    // Fallback to mock
     const preview = INITIAL_DRAFT.filter(f => f.type === 'ai').map(f => `${f.label}:\n${f.value}`).join('\n\n');
     streamText(preview, setGenText, () => { setStatus('done'); setGenText(''); });
   };
@@ -815,9 +898,8 @@ function DraftPanel() {
     <div className="flex-1 flex flex-col items-center justify-center gap-3 border border-border rounded-sm bg-surface p-8">
       <ClipboardList className="w-8 h-8 text-text-tertiary" />
       <button onClick={handleGenerate} className="flex items-center gap-2 px-4 py-2 bg-brand-primary text-white text-xs font-semibold rounded-sm hover:opacity-90">
-        <Play className="w-3.5 h-3.5" />Sinh nháp báo cáo
+        <Play className="w-3.5 h-3.5" />Yêu cầu CAE sinh nháp
       </button>
-      <p className="text-[10px] text-text-tertiary">Reporter Agent · mock demo</p>
     </div>
   );
 
@@ -838,7 +920,7 @@ function DraftPanel() {
       <div className="flex-1 flex flex-col gap-3 min-w-0 min-h-0">
         <div className="border border-border rounded-sm bg-surface flex flex-col flex-1 min-h-0">
           <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
-            <span className="text-xs font-semibold text-text-primary">Nháp báo cáo</span>
+            <span className="text-xs font-semibold text-text-primary">Nháp báo cáo do CAE hỗ trợ</span>
             {approved
               ? <span className="text-[10px] font-semibold text-semantic-success bg-semantic-success/10 border border-semantic-success/30 px-1.5 py-0.5 rounded-sm">✓ Đã duyệt</span>
               : <span className="text-[10px] font-semibold text-semantic-warning bg-semantic-warning/5 border border-semantic-warning/30 px-1.5 py-0.5 rounded-sm">Nháp · Chưa duyệt</span>}
@@ -898,7 +980,7 @@ function DraftPanel() {
       </div>
       {!approved && (
         <div className="w-56 shrink-0 border border-border rounded-sm bg-surface flex flex-col">
-          <div className="px-3 py-2 border-b border-border shrink-0"><span className="text-xs font-semibold text-text-primary">Điều chỉnh nháp</span></div>
+          <div className="px-3 py-2 border-b border-border shrink-0"><span className="text-xs font-semibold text-text-primary">CAE điều chỉnh nháp</span></div>
           <div className="flex-1 overflow-y-auto p-2 space-y-1.5 min-h-0">
             {msgs.length === 0 && ['Thêm theo dõi SpO₂ mỗi 4 giờ', 'Viết lại gợi ý CĐ ngắn hơn', 'Thêm phổi trái bình thường'].map(s => (
               <button key={s} onClick={() => setInput(s)} className="w-full text-left text-[10px] px-2 py-1.5 border border-border rounded-sm text-text-secondary hover:bg-background-secondary hover:border-brand-primary transition-colors">{s}</button>
@@ -946,6 +1028,8 @@ function CaseDetail() {
   const [fullscreen, setFullscreen] = useState(false);
   const [isLoadingEpisode, setIsLoadingEpisode] = useState(true);
   const [episodeError, setEpisodeError] = useState<string | null>(null);
+  const [caseInfo, setCaseInfo] = useState<CaseInfo>(DEFAULT_CASE_INFO);
+  const [liveCitations, setLiveCitations] = useState<Citation[]>(CITATIONS_DATA);
 
   // Fetch episode detail from API
   useEffect(() => {
@@ -956,10 +1040,16 @@ function CaseDetail() {
       try {
         const response = await getEpisodeDetail(id);
         if (response.success && response.episode) {
-          // Episode data fetched successfully
-          // For now, we still use mock PCXR samples
-          // TODO: Use real detection results from response.detection_result
-          console.log('Episode loaded:', response.episode);
+          const ep = response.episode;
+          setCaseInfo({
+            patientRef: ep.patient_ref ?? '—',
+            age: ep.age ?? '—',
+            gender: ep.gender ?? '—',
+            date: (ep.date ?? ep.admission_date ?? '—').slice(0, 10),
+            symptoms: ep.symptoms ?? '—',
+            spo2: ep.spo2 ?? '—',
+            crp: ep.crp ?? '—',
+          });
         } else {
           setEpisodeError(response.error?.message || 'Không thể tải thông tin ca');
         }
@@ -995,7 +1085,7 @@ function CaseDetail() {
           </Link>
           <ChevronRight className="w-3 h-3 text-text-tertiary" />
           <span className="text-xs font-semibold text-text-primary font-mono">{id}</span>
-          <span className="text-[10px] text-text-tertiary">· {MOCK_CASE.age} · {MOCK_CASE.date}</span>
+          <span className="text-[10px] text-text-tertiary">· {caseInfo.age} · {caseInfo.date}</span>
         </div>
 
         <div className="flex items-center gap-2">
@@ -1035,6 +1125,7 @@ function CaseDetail() {
         <ImagePanel
           widthPct={PANEL_WIDTHS[panelMode]}
           sample={sample}
+          caseInfo={caseInfo}
           hoveredIdx={hoveredIdx}
           onHoverIdx={setHoveredIdx}
           focusedIdx={focusedIdx}
@@ -1042,14 +1133,21 @@ function CaseDetail() {
           onFullscreen={() => setFullscreen(true)}
         />
         <div className="flex-1 min-w-0 flex flex-col gap-3 min-h-0">
+          <CAEDock
+            episodeId={id}
+            currentStep={step}
+            onActivityDetected={() => {
+              // User is interacting with dock, prevent auto-transitions
+            }}
+          />
           {step === 'detection' && <DetectionPanel sample={sample} hoveredIdx={hoveredIdx} onHoverIdx={setHoveredIdx} focusedIdx={focusedIdx} onFocusIdx={setFocusedIdx} onNext={() => handleSetStep('explain')} />}
-          {step === 'explain'   && <ExplainPanel onNext={() => handleSetStep('draft')} onCitation={setOpenCitation} />}
-          {step === 'draft'     && <DraftPanel />}
+          {step === 'explain'   && <ExplainPanel episodeId={id} sample={sample} onNext={() => handleSetStep('draft')} onCitation={setOpenCitation} onCitationsLoaded={setLiveCitations} />}
+          {step === 'draft'     && <DraftPanel episodeId={id} sample={sample} />}
         </div>
       </div>
 
-      {fullscreen && <FullscreenViewer sample={sample} hoveredIdx={hoveredIdx} onHoverIdx={setHoveredIdx} onClose={() => setFullscreen(false)} />}
-      {openCitation !== null && <CitationPopup num={openCitation} onClose={() => setOpenCitation(null)} />}
+      {fullscreen && <FullscreenViewer sample={sample} caseInfo={caseInfo} hoveredIdx={hoveredIdx} onHoverIdx={setHoveredIdx} onClose={() => setFullscreen(false)} />}
+      {openCitation !== null && <CitationPopup num={openCitation} citations={liveCitations} onClose={() => setOpenCitation(null)} />}
     </div>
   );
 }

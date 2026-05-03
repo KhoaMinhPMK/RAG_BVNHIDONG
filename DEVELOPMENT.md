@@ -126,8 +126,7 @@ webrag/
 │       │   └── types/       # TypeScript types
 │       └── package.json
 ├── docs/                    # Documentation
-├── knowledge_base/          # Medical knowledge documents
-└── .claude/                 # Claude Code settings
+└── knowledge_base/          # Medical knowledge documents
 ```
 
 ## 🧪 Testing
@@ -280,15 +279,6 @@ We're implementing structured output for CAE responses:
 6. **Commit**: `git commit -m "feat: your feature"`
 7. **Push**: `git push origin your-branch`
 8. **Create PR** (if working with team)
-
-## 🔧 Claude Code Hooks
-
-The project has custom hooks configured in `.claude/settings.json`:
-
-- **SessionStart:** Shows Node/npm/git info on startup
-- **PreToolUse:** Logs commands before execution
-- **PostToolUse:** Shows success/failure status
-- **Git hooks:** Pre-commit checks for git operations
 
 ## 💡 Tips
 

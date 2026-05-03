@@ -10,6 +10,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Pin, PinOff, ChevronLeft, ChevronRight, Brain, CheckCircle2, Loader2, AlertCircle, Send } from 'lucide-react';
 import { BlockRenderer } from './BlockRenderer';
+import { EvidenceRail } from './EvidenceRail';
 import { useCAEStream } from '@/hooks/useCAEStream';
 import type { RenderableBlock, CitationAnchor } from '@/types/cae-output';
 
@@ -20,6 +21,7 @@ interface CAEDockProps {
   episodeId: string;
   currentStep: 'detection' | 'explain' | 'draft';
   onCitationClick?: (citationId: string) => void;
+  onCitationHover?: (citationId: string | null) => void;
   onActivityDetected?: () => void;
 }
 
@@ -35,12 +37,13 @@ const STATE_WIDTHS: Record<DockState, string> = {
 const AUTO_COLLAPSE_DELAY = 5000; // 5s
 const HOVER_EXPAND_DELAY = 500; // 500ms
 
-export function CAEDock({ episodeId, currentStep, onCitationClick, onActivityDetected }: CAEDockProps) {
+export function CAEDock({ episodeId, currentStep, onCitationClick, onCitationHover, onActivityDetected }: CAEDockProps) {
   const [state, setState] = useState<DockState>('collapsed');
   const [mode, setMode] = useState<DockMode>('brief');
   const [isPinned, setIsPinned] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
   const [input, setInput] = useState('');
+  const [activeCitationId, setActiveCitationId] = useState<string | null>(null);
 
   const {
     isStreaming,
@@ -82,6 +85,13 @@ export function CAEDock({ episodeId, currentStep, onCitationClick, onActivityDet
   const summary = blocks.find(b => b.type === 'summary')?.text ||
                   blocks.find(b => b.type === 'paragraph')?.text.slice(0, 100) ||
                   '';
+
+  // Auto-expand to focus state when citations arrive
+  useEffect(() => {
+    if (citations.length > 0 && state === 'task' && !isPinned) {
+      setState('focus');
+    }
+  }, [citations.length, state, isPinned]);
 
   // Auto-collapse after inactivity
   useEffect(() => {
@@ -337,6 +347,16 @@ export function CAEDock({ episodeId, currentStep, onCitationClick, onActivityDet
     );
   };
 
+  // Handle citation interactions
+  const handleCitationClick = (citationId: string) => {
+    setActiveCitationId(citationId);
+    onCitationClick?.(citationId);
+  };
+
+  const handleCitationHover = (citationId: string | null) => {
+    onCitationHover?.(citationId);
+  };
+
   return (
     <div
       className={`${widthClass} transition-all duration-300 ease-in-out flex border-l border-border bg-background h-full`}
@@ -351,6 +371,16 @@ export function CAEDock({ episodeId, currentStep, onCitationClick, onActivityDet
         {renderContent()}
         {renderActionZone()}
       </div>
+
+      {/* Evidence Rail - shown in focus state */}
+      {state === 'focus' && citations.length > 0 && (
+        <EvidenceRail
+          citations={citations}
+          activeCitationId={activeCitationId}
+          onCitationClick={handleCitationClick}
+          onCitationHover={handleCitationHover}
+        />
+      )}
     </div>
   );
 }

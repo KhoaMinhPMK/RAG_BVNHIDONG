@@ -18,6 +18,7 @@ import { getEpisodeDetail, getLatestAiRun, getLatestDraft, invalidateDraftCache 
 import type { AiRunRow } from '@/lib/api/client';
 import { CAEDock } from '@/components/cae/CAEDock';
 import { BlockRenderer } from '@/components/cae/BlockRenderer';
+import { EvidenceRail } from '@/components/cae/EvidenceRail';
 import { useCAEStream } from '@/hooks/useCAEStream';
 import type { CitationAnchor, RenderableBlock, UIAction } from '@/types/cae-output';
 import { downloadReportPDF } from '@/components/pdf/ReportPDF';
@@ -206,21 +207,24 @@ function mapStructuredCitation(citation: CitationAnchor, index: number): Citatio
 function mapDraftFields(fields: Array<{
   field_id: string;
   label: string;
-  value: string;
+  value: unknown;
   source: 'ai' | 'manual' | 'locked';
   provenance: DraftProvenance[];
   status: 'valid' | 'needs_review' | 'policy_blocked';
 }>): DraftField[] {
-  return fields.map(field => ({
-    key: field.field_id,
-    label: field.label,
-    value: field.value ?? '',
-    modified: false,
-    rows: getFieldRows(field.value ?? ''),
-    source: field.source,
-    status: field.status,
-    provenance: field.provenance ?? [],
-  }));
+  return fields.map(field => {
+    const strValue = toFieldString(field.value);
+    return {
+      key: field.field_id,
+      label: field.label,
+      value: strValue,
+      modified: false,
+      rows: getFieldRows(strValue),
+      source: field.source,
+      status: field.status,
+      provenance: field.provenance ?? [],
+    };
+  });
 }
 
 /** Safely coerce an AI field value to a plain string regardless of LLM output shape */
@@ -825,6 +829,8 @@ function ExplainPanel({
   const [feedback, setFeedback] = useState<'accepted' | 'rejected' | null>(null);
   const [hasStarted, setHasStarted] = useState(false);
   const [showFindings, setShowFindings] = useState(false);
+  const [activeCitationId, setActiveCitationId] = useState<string | null>(null);
+  const [hoveredCitationId, setHoveredCitationId] = useState<string | null>(null);
   // DB restore state
   const [restoredBlocks, setRestoredBlocks] = useState<RenderableBlock[]>([]);
   const [restoredCitations, setRestoredCitations] = useState<CitationAnchor[]>([]);
@@ -912,9 +918,14 @@ function ExplainPanel({
   };
 
   const handleCitationSelect = (citationId: string) => {
-    const parsedId = Number.parseInt(citationId, 10);
-    if (Number.isFinite(parsedId)) {
-      onCitation(parsedId);
+    setActiveCitationId(citationId);
+    // Spatial focus: resolve findingIds -> annotation index -> onFocusIdx
+    const anchor = citations.find(c => c.citationId === citationId);
+    if (anchor?.findingIds && anchor.findingIds.length > 0) {
+      const foundIndex = sample.annotations.findIndex(a => String(a.id) === anchor.findingIds![0]);
+      if (foundIndex >= 0) {
+        onFocusIdx(foundIndex);
+      }
     }
   };
 
@@ -993,6 +1004,7 @@ function ExplainPanel({
 
       {/* ── Done ─────────────────────────────────────────────────────────── */}
       {status === 'done' && (
+        <div className="flex flex-row flex-1 min-h-0">
         <div className="border border-border rounded-sm bg-surface flex flex-col flex-1 min-h-0">
           {/* Header */}
           <div className="px-3 py-2 border-b border-border shrink-0 flex items-center gap-2">
@@ -1071,7 +1083,12 @@ function ExplainPanel({
           {/* Narrative content */}
           <div className="flex-1 overflow-y-auto p-4 min-h-0">
             {blocks.length > 0 ? (
-              <BlockRenderer blocks={blocks} onCitationClick={handleCitationSelect} />
+              <BlockRenderer
+                blocks={blocks}
+                onCitationClick={handleCitationSelect}
+                onCitationHover={setHoveredCitationId}
+                hoveredCitationId={hoveredCitationId}
+              />
             ) : (
               <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">{content}</p>
             )}
@@ -1112,6 +1129,16 @@ function ExplainPanel({
               Tiếp tục — Sinh nháp <ChevronRight className="w-3 h-3" />
             </button>
           </div>
+        </div>
+        {/* Evidence Rail — only when citations available */}
+        {citations.length > 0 && (
+          <EvidenceRail
+            citations={citations}
+            activeCitationId={activeCitationId}
+            onCitationClick={handleCitationSelect}
+            onCitationHover={setHoveredCitationId}
+          />
+        )}
         </div>
       )}
     </div>
@@ -1251,7 +1278,7 @@ function DraftPanel({
       const target = `${field.key} ${field.label}`.toLowerCase();
       return lowerKeywords.some((keyword) => target.includes(keyword));
     });
-    return String(match?.value ?? '').trim();
+    return toFieldString(match?.value).trim();
   };
 
   const requiredSections = [

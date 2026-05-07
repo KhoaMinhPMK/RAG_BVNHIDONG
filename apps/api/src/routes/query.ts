@@ -35,13 +35,30 @@ router.post(
 
       logger.info('Query request received', { query: query.slice(0, 100), role, provider });
 
-      // Call Knowledge Agent
-      const result = await knowledgeAgent.query({
-        query,
-        role,
-        episode_id,
-        provider: provider || 'mimo',
-      });
+      // Abort if client disconnects mid-query
+      const ac = new AbortController();
+      req.on('close', () => ac.abort());
+
+      // Hard deadline: 45 s for the full 5-step RAG pipeline
+      const QUERY_TIMEOUT_MS = Number(process.env.QUERY_TIMEOUT_MS) || 45_000;
+      const timeoutId = setTimeout(() => ac.abort(new Error('Query pipeline timeout')), QUERY_TIMEOUT_MS);
+
+      let result;
+      try {
+        result = await knowledgeAgent.query({
+          query,
+          role,
+          episode_id,
+          provider: provider || 'mimo',
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      if (ac.signal.aborted) {
+        // Client already gone or timed out — nothing useful to send back
+        return;
+      }
 
       const response: ApiResponse<QueryResponse> = {
         success: true,
@@ -55,7 +72,7 @@ router.post(
         answer:     result.answer ?? '',
         sources:    result.citations ?? [],
         created_by: req.userId ?? null,
-      });
+      }).catch((err) => logger.error('saveQueryResult failed', { err }));
 
       res.json(response);
     } catch (error) {

@@ -67,7 +67,8 @@ async function callOllama(
 
 async function callMimo(
   messages: UnifiedChatMessage[],
-  opts: UnifiedChatOptions
+  opts: UnifiedChatOptions,
+  signal?: AbortSignal
 ): Promise<UnifiedChatResult> {
   const t0 = Date.now();
   const { getMiMoClient } = await import('../mimo/client.js');
@@ -77,7 +78,7 @@ async function callMimo(
     temperature: opts.temperature ?? 1.0,
     max_tokens: opts.max_tokens ?? 2048,
     top_p: opts.top_p ?? 0.95,
-  });
+  }, undefined, signal);
 
   const content = result.choices[0]?.message?.content ?? '';
 
@@ -95,13 +96,14 @@ async function callMimo(
 export async function llmChat(
   messages: UnifiedChatMessage[],
   opts: UnifiedChatOptions = {},
-  provider: LLMProvider = 'ollama'
+  provider: LLMProvider = 'ollama',
+  signal?: AbortSignal
 ): Promise<UnifiedChatResult> {
   logger.info('[UnifiedLLM] chat', { provider, messages: messages.length });
 
   try {
     if (provider === 'mimo') {
-      return await callMimo(messages, opts);
+      return await callMimo(messages, opts, signal);
     }
     return await callOllama(messages, opts);
   } catch (err) {

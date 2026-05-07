@@ -32,6 +32,7 @@ export type CAESSEEvent =
 interface StreamCAEOptions {
   findingIds?: string[];
   runId?: string;
+  signal?: AbortSignal;
   onBlock?: (block: RenderableBlock) => void;
   onContent?: (text: string) => void;
   onCitations?: (citations: CitationAnchor[]) => void;
@@ -515,7 +516,8 @@ export async function streamBrief(
           });
           res.end();
         },
-      }
+      },
+      options.signal
     );
   } catch (err) {
     logError('[CAE] streamBrief error', err, { episodeId });
@@ -634,7 +636,8 @@ export async function streamChat(
           });
           res.end();
         },
-      }
+      },
+      options.signal
     );
   } catch (err) {
     logError('[CAE] streamChat error', err, { episodeId });

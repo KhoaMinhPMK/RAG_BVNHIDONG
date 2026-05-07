@@ -12,13 +12,15 @@ import type { RenderableBlock } from '@/types/cae-output';
 interface BlockRendererProps {
   blocks: RenderableBlock[];
   onCitationClick?: (citationId: string) => void;
+  onCitationHover?: (citationId: string | null) => void;
+  hoveredCitationId?: string | null;
 }
 
-export function BlockRenderer({ blocks, onCitationClick }: BlockRendererProps) {
+export function BlockRenderer({ blocks, onCitationClick, onCitationHover, hoveredCitationId }: BlockRendererProps) {
   return (
     <div className="space-y-3">
       {blocks.map((block, index) => (
-        <Block key={index} block={block} onCitationClick={onCitationClick} />
+        <Block key={index} block={block} onCitationClick={onCitationClick} onCitationHover={onCitationHover} hoveredCitationId={hoveredCitationId} />
       ))}
     </div>
   );
@@ -27,14 +29,16 @@ export function BlockRenderer({ blocks, onCitationClick }: BlockRendererProps) {
 interface BlockProps {
   block: RenderableBlock;
   onCitationClick?: (citationId: string) => void;
+  onCitationHover?: (citationId: string | null) => void;
+  hoveredCitationId?: string | null;
 }
 
-function Block({ block, onCitationClick }: BlockProps) {
+function Block({ block, onCitationClick, onCitationHover, hoveredCitationId }: BlockProps) {
   switch (block.type) {
     case 'summary':
       return <SummaryBlock text={block.text} />;
     case 'paragraph':
-      return <ParagraphBlock text={block.text} onCitationClick={onCitationClick} />;
+      return <ParagraphBlock text={block.text} onCitationClick={onCitationClick} onCitationHover={onCitationHover} hoveredCitationId={hoveredCitationId} />;
     case 'bullet_list':
       return <BulletListBlock items={block.items} />;
     case 'warning':
@@ -74,7 +78,12 @@ function SummaryBlock({ text }: { text: string }) {
 // Paragraph Block
 // ============================================================================
 
-function ParagraphBlock({ text, onCitationClick }: { text: string; onCitationClick?: (citationId: string) => void }) {
+function ParagraphBlock({ text, onCitationClick, onCitationHover, hoveredCitationId }: {
+  text: string;
+  onCitationClick?: (citationId: string) => void;
+  onCitationHover?: (citationId: string | null) => void;
+  hoveredCitationId?: string | null;
+}) {
   // Parse citation markers like [1], [2] and make them clickable
   const parts = text.split(/(\[\d+\])/g);
 
@@ -84,11 +93,18 @@ function ParagraphBlock({ text, onCitationClick }: { text: string; onCitationCli
         const match = part.match(/^\[(\d+)\]$/);
         if (match && onCitationClick) {
           const num = match[1];
+          const isHovered = hoveredCitationId === num;
           return (
             <button
               key={i}
               onClick={() => onCitationClick(num)}
-              className="inline-flex items-center justify-center w-[17px] h-[14px] text-[9px] font-bold text-brand-primary bg-brand-light border border-brand-primary/40 rounded-sm mx-0.5 hover:bg-brand-primary hover:text-white transition-colors align-middle"
+              onMouseEnter={() => onCitationHover?.(num)}
+              onMouseLeave={() => onCitationHover?.(null)}
+              className={`inline-flex items-center justify-center w-[17px] h-[14px] text-[9px] font-bold rounded-sm mx-0.5 transition-colors align-middle ${
+                isHovered
+                  ? 'bg-brand-primary text-white ring-1 ring-brand-primary/60 scale-110'
+                  : 'text-brand-primary bg-brand-light border border-brand-primary/40 hover:bg-brand-primary hover:text-white'
+              }`}
             >
               {num}
             </button>

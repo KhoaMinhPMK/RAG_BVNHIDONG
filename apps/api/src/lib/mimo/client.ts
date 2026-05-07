@@ -87,6 +87,11 @@ interface MiMoTTSResponse {
   duration: number;
 }
 
+// ─── Internal constants ───────────────────────────────────────────────────────
+
+/** Default timeout for non-streaming calls (ms). Configurable via MIMO_TIMEOUT_MS env var. */
+const MIMO_TIMEOUT_MS = Number(process.env.MIMO_TIMEOUT_MS) || 90_000;
+
 // ─── Client ───────────────────────────────────────────────────────────────────
 
 export class MiMoClient {
@@ -122,33 +127,44 @@ export class MiMoClient {
   async chat(
     messages: MiMoMessage[],
     options: MiMoChatOptions = {},
-    model?: string
+    model?: string,
+    signal?: AbortSignal
   ): Promise<MiMoChatResponse> {
     const targetModel = model || this.primaryModel;
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify({
-        model: targetModel,
-        messages,
-        temperature: options.temperature ?? 1.0,
-        max_completion_tokens: options.max_tokens ?? 2048,
-        top_p: options.top_p ?? 0.95,
-        stream: false,
-        frequency_penalty: 0,
-        presence_penalty: 0,
-        stop: null,
-        thinking: { type: options.thinking ?? 'disabled' },
-      }),
-    });
+    // Combine caller signal with an internal deadline
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(new Error(`MiMo chat timeout (${MIMO_TIMEOUT_MS}ms)`)), MIMO_TIMEOUT_MS);
+    if (signal) signal.addEventListener('abort', () => ac.abort(signal.reason), { once: true });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`MiMo API error: ${response.status} - ${error}`);
+    try {
+      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: this.getHeaders(),
+        signal: ac.signal,
+        body: JSON.stringify({
+          model: targetModel,
+          messages,
+          temperature: options.temperature ?? 1.0,
+          max_completion_tokens: options.max_tokens ?? 2048,
+          top_p: options.top_p ?? 0.95,
+          stream: false,
+          frequency_penalty: 0,
+          presence_penalty: 0,
+          stop: null,
+          thinking: { type: options.thinking ?? 'disabled' },
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`MiMo API error: ${response.status} - ${error}`);
+      }
+
+      return response.json() as Promise<MiMoChatResponse>;
+    } finally {
+      clearTimeout(timer);
     }
-
-    return response.json() as Promise<MiMoChatResponse>;
   }
 
   // ─── Agentic streaming loop with tool calling ─────────────────────────────
@@ -157,152 +173,185 @@ export class MiMoClient {
    * stream the final answer — all via callbacks.
    *
    * max 6 iterations to prevent infinite loops.
+   *
+   * @param signal - Optional AbortSignal. When aborted (e.g. client disconnect),
+   *   the current fetch and reader loop are cancelled immediately.
    */
   async chatStreamAgent(
     messages: MiMoMessage[],
     tools: MiMoTool[],
     toolExecutor: (name: string, args: Record<string, unknown>) => Promise<string>,
     options: MiMoChatOptions = {},
-    callbacks: CAECallbacks = {}
+    callbacks: CAECallbacks = {},
+    signal?: AbortSignal
   ): Promise<void> {
     const history: MiMoMessage[] = [...messages];
     const MAX_ITER = 6;
 
     for (let iter = 0; iter < MAX_ITER; iter++) {
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify({
-          model: this.primaryModel,
-          messages: history,
-          tools: tools.length > 0 ? tools : undefined,
-          tool_choice: tools.length > 0 ? 'auto' : undefined,
-          stream: true,
-          thinking: { type: options.thinking ?? 'enabled' },
-          temperature: options.temperature ?? 1.0,
-          max_completion_tokens: options.max_tokens ?? 4096,
-          top_p: options.top_p ?? 0.95,
-          frequency_penalty: 0,
-          presence_penalty: 0,
-        }),
-      });
+      // Abort before issuing a new network request
+      if (signal?.aborted) return;
 
-      if (!response.ok) {
-        const errBody = await response.text().catch(() => '(no body)');
-        throw new Error(`MiMo stream error: HTTP ${response.status} - ${errBody}`);
-      }
+      // Per-iteration timeout: each stream turn gets its own deadline
+      const iterAc = new AbortController();
+      const iterTimer = setTimeout(
+        () => iterAc.abort(new Error(`MiMo stream turn timeout (${MIMO_TIMEOUT_MS}ms)`)),
+        MIMO_TIMEOUT_MS
+      );
+      // Propagate external abort into the iteration controller
+      const onExternalAbort = () => iterAc.abort(signal!.reason);
+      if (signal) signal.addEventListener('abort', onExternalAbort, { once: true });
 
-      if (!response.body) {
-        throw new Error('MiMo stream error: response body is null');
-      }
+      let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+      try {
+        const response = await fetch(`${this.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: this.getHeaders(),
+          signal: iterAc.signal,
+          body: JSON.stringify({
+            model: this.primaryModel,
+            messages: history,
+            tools: tools.length > 0 ? tools : undefined,
+            tool_choice: tools.length > 0 ? 'auto' : undefined,
+            stream: true,
+            thinking: { type: options.thinking ?? 'enabled' },
+            temperature: options.temperature ?? 1.0,
+            max_completion_tokens: options.max_tokens ?? 4096,
+            top_p: options.top_p ?? 0.95,
+            frequency_penalty: 0,
+            presence_penalty: 0,
+          }),
+        });
 
-      // Parse SSE stream
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
+        if (!response.ok) {
+          const errBody = await response.text().catch(() => '(no body)');
+          throw new Error(`MiMo stream error: HTTP ${response.status} - ${errBody}`);
+        }
 
-      let collectedContent = '';
-      let collectedReasoning = '';
-      // indexed by tool_calls[].index
-      const toolCallMap: Record<number, { id: string; name: string; args: string }> = {};
-      let finishReason = '';
-      let lastUsage: MiMoChatResponse['usage'] | null = null;
-      let buf = '';
+        if (!response.body) {
+          throw new Error('MiMo stream error: response body is null');
+        }
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        // Parse SSE stream
+        reader = response.body.getReader();
+        const decoder = new TextDecoder();
 
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop() ?? '';
+        let collectedContent = '';
+        let collectedReasoning = '';
+        // indexed by tool_calls[].index
+        const toolCallMap: Record<number, { id: string; name: string; args: string }> = {};
+        let finishReason = '';
+        let lastUsage: MiMoChatResponse['usage'] | null = null;
+        let buf = '';
 
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const raw = line.slice(6).trim();
-          if (raw === '[DONE]') break;
-
-          let chunk: any;
-          try { chunk = JSON.parse(raw); } catch { continue; }
-
-          const choice = chunk.choices?.[0];
-          if (!choice) {
-            if (chunk.usage) lastUsage = chunk.usage;
-            continue;
+        while (true) {
+          // Abort mid-stream on signal
+          if (signal?.aborted) {
+            await reader.cancel().catch(() => {});
+            return;
           }
 
-          finishReason = choice.finish_reason || finishReason;
-          const delta = choice.delta ?? {};
+          const { done, value } = await reader.read();
+          if (done) break;
 
-          // Chain-of-thought (reasoning)
-          if (delta.reasoning_content) {
-            collectedReasoning += delta.reasoning_content;
-            callbacks.onThinking?.(delta.reasoning_content);
-          }
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop() ?? '';
 
-          // Regular content
-          if (delta.content) {
-            collectedContent += delta.content;
-            callbacks.onContent?.(delta.content);
-          }
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const raw = line.slice(6).trim();
+            if (raw === '[DONE]') break;
 
-          // Tool calls accumulation
-          if (delta.tool_calls) {
-            for (const tc of delta.tool_calls) {
-              const idx: number = tc.index ?? 0;
-              if (!toolCallMap[idx]) {
-                toolCallMap[idx] = { id: '', name: '', args: '' };
+            let chunk: any;
+            try { chunk = JSON.parse(raw); } catch { continue; }
+
+            const choice = chunk.choices?.[0];
+            if (!choice) {
+              if (chunk.usage) lastUsage = chunk.usage;
+              continue;
+            }
+
+            finishReason = choice.finish_reason || finishReason;
+            const delta = choice.delta ?? {};
+
+            // Chain-of-thought (reasoning)
+            if (delta.reasoning_content) {
+              collectedReasoning += delta.reasoning_content;
+              callbacks.onThinking?.(delta.reasoning_content);
+            }
+
+            // Regular content
+            if (delta.content) {
+              collectedContent += delta.content;
+              callbacks.onContent?.(delta.content);
+            }
+
+            // Tool calls accumulation
+            if (delta.tool_calls) {
+              for (const tc of delta.tool_calls) {
+                const idx: number = tc.index ?? 0;
+                if (!toolCallMap[idx]) {
+                  toolCallMap[idx] = { id: '', name: '', args: '' };
+                }
+                if (tc.id) toolCallMap[idx].id = tc.id;
+                if (tc.function?.name) toolCallMap[idx].name = tc.function.name;
+                if (tc.function?.arguments) toolCallMap[idx].args += tc.function.arguments;
               }
-              if (tc.id) toolCallMap[idx].id = tc.id;
-              if (tc.function?.name) toolCallMap[idx].name = tc.function.name;
-              if (tc.function?.arguments) toolCallMap[idx].args += tc.function.arguments;
             }
           }
         }
-      }
 
-      // If tool calls requested → execute and continue
-      if (finishReason === 'tool_calls' && Object.keys(toolCallMap).length > 0) {
-        // Add assistant message (with tool_calls) to history
-        history.push({
-          role: 'assistant',
-          content: collectedContent || null,
-          reasoning_content: collectedReasoning || undefined,
-          tool_calls: Object.values(toolCallMap).map(tc => ({
-            id: tc.id,
-            type: 'function' as const,
-            function: { name: tc.name, arguments: tc.args },
-          })),
-        });
-
-        // Execute each tool
-        for (const tc of Object.values(toolCallMap)) {
-          let args: Record<string, unknown> = {};
-          try { args = JSON.parse(tc.args || '{}'); } catch {}
-
-          callbacks.onToolStart?.(tc.name, args);
-
-          let result = '';
-          try {
-            result = await toolExecutor(tc.name, args);
-          } catch (e) {
-            result = `Tool error: ${e instanceof Error ? e.message : String(e)}`;
-          }
-          callbacks.onToolDone?.(tc.name, result.slice(0, 300));
-
+        // If tool calls requested → execute and continue
+        if (finishReason === 'tool_calls' && Object.keys(toolCallMap).length > 0) {
+          // Add assistant message (with tool_calls) to history
           history.push({
-            role: 'tool',
-            content: result,
-            tool_call_id: tc.id,
+            role: 'assistant',
+            content: collectedContent || null,
+            reasoning_content: collectedReasoning || undefined,
+            tool_calls: Object.values(toolCallMap).map(tc => ({
+              id: tc.id,
+              type: 'function' as const,
+              function: { name: tc.name, arguments: tc.args },
+            })),
           });
+
+          // Execute each tool
+          for (const tc of Object.values(toolCallMap)) {
+            if (signal?.aborted) return;
+
+            let args: Record<string, unknown> = {};
+            try { args = JSON.parse(tc.args || '{}'); } catch {}
+
+            callbacks.onToolStart?.(tc.name, args);
+
+            let result = '';
+            try {
+              result = await toolExecutor(tc.name, args);
+            } catch (e) {
+              result = `Tool error: ${e instanceof Error ? e.message : String(e)}`;
+            }
+            callbacks.onToolDone?.(tc.name, result.slice(0, 300));
+
+            history.push({
+              role: 'tool',
+              content: result,
+              tool_call_id: tc.id,
+            });
+          }
+
+          // Loop back for next model response
+          continue;
         }
 
-        // Loop back for next model response
-        continue;
+        // Final answer reached
+        callbacks.onDone?.(lastUsage);
+        break;
+      } finally {
+        clearTimeout(iterTimer);
+        if (signal) signal.removeEventListener('abort', onExternalAbort);
+        if (reader) reader.cancel().catch(() => {});
       }
-
-      // Final answer reached
-      callbacks.onDone?.(lastUsage);
-      break;
     }
   }
 
@@ -312,23 +361,30 @@ export class MiMoClient {
     text: string,
     voice: string = 'mimo_default'
   ): Promise<Buffer> {
-    const response = await fetch(`${this.baseUrl}/audio/speech`, {
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify({
-        model: this.ttsModel,
-        input: text,
-        voice,
-        response_format: 'mp3',
-      }),
-    });
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(new Error('MiMo TTS timeout')), MIMO_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${this.baseUrl}/audio/speech`, {
+        method: 'POST',
+        headers: this.getHeaders(),
+        signal: ac.signal,
+        body: JSON.stringify({
+          model: this.ttsModel,
+          input: text,
+          voice,
+          response_format: 'mp3',
+        }),
+      });
 
-    if (!response.ok) {
-      const err = await response.text();
-      throw new Error(`MiMo TTS error: ${response.status} - ${err}`);
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`MiMo TTS error: ${response.status} - ${err}`);
+      }
+
+      return Buffer.from(await response.arrayBuffer());
+    } finally {
+      clearTimeout(timer);
     }
-
-    return Buffer.from(await response.arrayBuffer());
   }
 
   // ─── Image analysis (Omni model) ─────────────────────────────────────────
@@ -364,7 +420,9 @@ export class MiMoClient {
     try {
       await this.chat([{ role: 'user', content: 'ping' }], { max_tokens: 4, thinking: 'disabled' });
       return true;
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn('[MiMo] isAvailable check failed:', msg);
       return false;
     }
   }

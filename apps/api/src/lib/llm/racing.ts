@@ -4,8 +4,8 @@
  * Store both for comparison and quality monitoring
  */
 
-import { getMiMoClient } from '../mimo/client';
-import { getOllamaClient } from '../ollama/client';
+import { getMiMoClient } from '../mimo/client.js';
+import { getOllamaClient } from '../ollama/client.js';
 
 interface RacingResult {
   winner: 'ollama' | 'mimo';
@@ -137,27 +137,28 @@ ${context}`;
     timeout: number
   ): Promise<{ response: string; time: number }> {
     const startTime = Date.now();
+    const { promise: timeoutP, clear } = this.timeoutPromise(timeout, 'Ollama timeout');
 
     try {
       const response = await Promise.race([
         this.ollamaClient.generate({
-          model: 'qwen2.5:7b',
+          model: process.env.OLLAMA_MODEL || 'qwen2.5:7b',
           system: systemPrompt,
           prompt: userPrompt,
           stream: false,
         }),
-        this.timeoutPromise(timeout, 'Ollama timeout'),
+        timeoutP,
       ]);
-
-      const time = Date.now() - startTime;
 
       return {
         response: response.response,
-        time,
+        time: Date.now() - startTime,
       };
     } catch (error) {
       console.error('[LLMRacer] Ollama error:', error);
       throw error;
+    } finally {
+      clear();
     }
   }
 
@@ -170,6 +171,7 @@ ${context}`;
     timeout: number
   ): Promise<{ response: string; time: number }> {
     const startTime = Date.now();
+    const { promise: timeoutP, clear } = this.timeoutPromise(timeout, 'MiMo timeout');
 
     try {
       const response = await Promise.race([
@@ -177,28 +179,32 @@ ${context}`;
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ]),
-        this.timeoutPromise(timeout, 'MiMo timeout'),
+        timeoutP,
       ]);
-
-      const time = Date.now() - startTime;
 
       return {
         response: response.choices[0]?.message?.content || '',
-        time,
+        time: Date.now() - startTime,
       };
     } catch (error) {
       console.error('[LLMRacer] MiMo error:', error);
       throw error;
+    } finally {
+      clear();
     }
   }
 
   /**
-   * Timeout promise helper
+   * Timeout promise helper — clears the timer when the returned promise
+   * is raced against a succeeding promise so the handle does not leak.
    */
-  private timeoutPromise(ms: number, message: string): Promise<never> {
-    return new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(message)), ms);
+  private timeoutPromise(ms: number, message: string): { promise: Promise<never>; clear: () => void } {
+    let timer: ReturnType<typeof setTimeout>;
+    const promise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms);
     });
+    const clear = () => clearTimeout(timer!);
+    return { promise, clear };
   }
 
   /**

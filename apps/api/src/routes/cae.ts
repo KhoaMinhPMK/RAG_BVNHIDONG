@@ -38,11 +38,13 @@ router.post('/brief', authenticateJWT, async (req: Request, res: Response) => {
     finding_ids, created_by: userId ?? undefined,
   });
 
+  const disconnectAc = new AbortController();
   let streamFinished = false;
   req.on('close', () => {
     // Only abort if stream hasn't finished — avoids overwriting completed runs
     // (req 'close' fires on normal connection end too, not just client disconnect)
     if (!streamFinished && run_id) void abortRun(run_id, collectedBlocks);
+    disconnectAc.abort();
   });
 
   const collectedBlocks: AiRunBlock[] = [];
@@ -52,6 +54,7 @@ router.post('/brief', authenticateJWT, async (req: Request, res: Response) => {
     await streamBrief(episode_id, res, {
       findingIds: finding_ids,
       runId: run_id ?? undefined,
+      signal: disconnectAc.signal,
       onBlock: (block: AiRunBlock) => { collectedBlocks.push(block); },
       onContent: (text: string) => { collectedContent += text; },
     });
@@ -89,17 +92,20 @@ router.post('/chat', authenticateJWT, async (req: Request, res: Response) => {
     finding_ids, created_by: userId ?? undefined,
   });
 
+  const disconnectAc = new AbortController();
   let streamFinished = false;
   const collectedBlocks: AiRunBlock[] = [];
   let collectedContent = '';
   req.on('close', () => {
     if (!streamFinished && run_id) void abortRun(run_id, collectedBlocks);
+    disconnectAc.abort();
   });
 
   try {
     await streamChat(episode_id, messages || [], res, {
       findingIds: finding_ids,
       runId: run_id ?? undefined,
+      signal: disconnectAc.signal,
       onBlock: (block: AiRunBlock) => { collectedBlocks.push(block); },
       onContent: (text: string) => { collectedContent += text; },
     });
@@ -150,12 +156,14 @@ router.post(
       finding_ids, created_by: userId ?? undefined,
     });
 
+    const disconnectAc = new AbortController();
     let streamFinished = false;
     const collectedBlocks: AiRunBlock[] = [];
     let collectedContent = '';
     const collectedCitations: unknown[] = [];
     req.on('close', () => {
       if (!streamFinished && run_id) void abortRun(run_id, collectedBlocks);
+      disconnectAc.abort();
     });
 
     try {
@@ -163,6 +171,7 @@ router.post(
         clinicalData: clinical_data,
         findingIds: finding_ids,
         runId: run_id ?? undefined,
+        signal: disconnectAc.signal,
         onBlock: (block: AiRunBlock) => { collectedBlocks.push(block); },
         onContent: (text: string) => { collectedContent += text; },
         onCitations: (cits: unknown[]) => { collectedCitations.push(...cits); },
@@ -218,6 +227,7 @@ router.post(
       finding_ids, created_by: userId ?? undefined,
     });
 
+    const disconnectAc = new AbortController();
     let streamFinished = false;
     const collectedBlocks: AiRunBlock[] = [];
     let collectedContent = '';
@@ -225,6 +235,7 @@ router.post(
     let draftRef: string | undefined;
     req.on('close', () => {
       if (!streamFinished && run_id) void abortRun(run_id, collectedBlocks);
+      disconnectAc.abort();
     });
 
     try {
@@ -232,6 +243,7 @@ router.post(
         clinicalData: clinical_data,
         findingIds: finding_ids,
         runId: run_id ?? undefined,
+        signal: disconnectAc.signal,
         onBlock: (block: AiRunBlock) => { collectedBlocks.push(block); },
         onContent: (text: string) => { collectedContent += text; },
         onCitations: (cits: unknown[]) => { collectedCitations.push(...cits); },

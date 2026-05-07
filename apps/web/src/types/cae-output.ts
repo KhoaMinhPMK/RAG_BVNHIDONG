@@ -135,6 +135,8 @@ export interface CitationAnchor {
   documentId: string;
   documentTitle: string;
   excerpt: string;
+  /** Optional structured excerpt with surrounding context for the excerpt viewer */
+  excerptContext?: { before: string; text: string; after: string };
   similarity: number;
   version?: string;
   effectiveDate?: string;

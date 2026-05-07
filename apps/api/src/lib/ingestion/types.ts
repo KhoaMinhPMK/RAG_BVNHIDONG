@@ -20,9 +20,17 @@ export interface DocumentMetadata {
   institution?: string;
 }
 
+export interface ParsedSection {
+  heading: string;
+  level: number;       // 1 = H1, 2 = H2, etc.
+  content: string;
+  page_estimate?: number;
+}
+
 export interface ParsedDocument {
   content: string;
   metadata: DocumentMetadata;
+  sections?: ParsedSection[];
   page_count?: number;
   word_count?: number;
 }
@@ -39,6 +47,10 @@ export interface ChunkMetadata {
   end_page?: number;
   section_title?: string;
   token_count: number;
+  // Hierarchical / contextual metadata
+  parent_chunk_id?: string;
+  heading_hierarchy?: string[];   // e.g. ['1. Diagnosis', '1.2 X-Ray']
+  context_prefix?: string;        // prepended context for better embeddings
 }
 
 export interface DocumentChunk {

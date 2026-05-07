@@ -9,7 +9,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import matter from 'gray-matter';
 import crypto from 'crypto';
-import { ParsedDocument, DocumentMetadata } from './types.js';
+import { ParsedDocument, DocumentMetadata, ParsedSection } from './types.js';
 import { logger } from '../utils/logger.js';
 import { createRequire } from 'module';
 
@@ -46,6 +46,9 @@ export class PDFParser {
       // Extract metadata from filename or frontmatter
       const metadata = await this.extractMetadata(filePath, content);
 
+      // Extract sections (headings + content blocks)
+      const sections = this.extractSections(content);
+
       // Calculate stats
       const wordCount = content.split(/\s+/).filter((w: string) => w.length > 0).length;
 
@@ -53,11 +56,13 @@ export class PDFParser {
         filePath,
         pageCount: pdfData.numpages,
         wordCount,
+        sectionCount: sections.length,
       });
 
       return {
         content,
         metadata,
+        sections,
         page_count: pdfData.numpages,
         word_count: wordCount,
       };
@@ -65,6 +70,75 @@ export class PDFParser {
       logger.error('PDF parsing failed', { filePath, error });
       throw new Error(`Failed to parse PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  /**
+   * Extract section structure from parsed text.
+   * Detects common heading patterns used in medical documents:
+   * - Numbered headings: "1.", "1.1", "1.1.1"
+   * - ALL-CAPS lines (short, likely headings)
+   * - Lines ending with ":" that are short
+   */
+  extractSections(content: string): ParsedSection[] {
+    const lines = content.split('\n');
+    const sections: ParsedSection[] = [];
+
+    // Patterns for headings
+    const numberedHeading = /^(\d+(?:\.\d+)*)\s+(.+)$/;
+    const allCapsHeading = /^[A-Z\s\u00C0-\u024F]{4,60}$/;
+    const colonHeading = /^(.{5,60}):?\s*$/;
+
+    let currentHeading = '';
+    let currentLevel = 0;
+    let currentLines: string[] = [];
+    let pageEstimate = 1;
+
+    const flushSection = () => {
+      if (currentHeading && currentLines.length > 0) {
+        sections.push({
+          heading: currentHeading,
+          level: currentLevel,
+          content: currentLines.join('\n').trim(),
+          page_estimate: pageEstimate,
+        });
+      }
+      currentLines = [];
+    };
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      // Rough page estimation: every ~40 lines ≈ 1 page
+      if (lines.indexOf(line) % 40 === 0) pageEstimate++;
+
+      const numberedMatch = trimmed.match(numberedHeading);
+      if (numberedMatch) {
+        flushSection();
+        const number = numberedMatch[1];
+        currentLevel = number.split('.').length;
+        currentHeading = trimmed;
+        continue;
+      }
+
+      if (allCapsHeading.test(trimmed) && trimmed.length < 60 && trimmed.split(' ').length <= 8) {
+        flushSection();
+        currentLevel = 1;
+        currentHeading = trimmed;
+        continue;
+      }
+
+      currentLines.push(trimmed);
+    }
+
+    flushSection();
+
+    // If no sections detected, return single fallback section
+    if (sections.length === 0) {
+      sections.push({ heading: 'Content', level: 1, content, page_estimate: 1 });
+    }
+
+    return sections;
   }
 
   /**

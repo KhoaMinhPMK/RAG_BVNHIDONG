@@ -7,6 +7,7 @@
 
 import { DocumentChunk, ChunkingOptions, ParsedDocument } from './types.js';
 import { tokenizer, SentenceSplitter, ParagraphSplitter } from '../utils/tokenizer.js';
+import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../utils/logger.js';
 
 // ============================================================================
@@ -74,38 +75,127 @@ export class Chunker {
   }
 
   /**
-   * Chunk a parsed document into smaller pieces
+   * Chunk a parsed document into smaller pieces.
+   * If the document has extracted sections, chunk per-section so heading
+   * context travels with each chunk.  Otherwise fall back to flat chunking.
    */
   chunkDocument(document: ParsedDocument, documentId: string): DocumentChunk[] {
     logger.info('Chunking document', {
       documentId,
       title: document.metadata.title,
       contentLength: document.content.length,
+      sectionCount: document.sections?.length ?? 0,
       options: this.options,
     });
 
-    const chunks = this.createChunks(document.content);
+    const documentChunks: DocumentChunk[] =
+      document.sections && document.sections.length > 1
+        ? this.chunkBySections(document, documentId)
+        : this.chunkFlat(document, documentId);
 
-    // Add metadata to each chunk
-    const documentChunks: DocumentChunk[] = chunks.map((content, index) => ({
+    logger.info('Document chunked successfully', {
+      documentId,
+      totalChunks: documentChunks.length,
+      avgTokens: Math.round(
+        documentChunks.reduce((sum, c) => sum + c.metadata.token_count, 0) /
+          Math.max(documentChunks.length, 1)
+      ),
+    });
+
+    return documentChunks;
+  }
+
+  /**
+   * Section-aware chunking: each section is chunked independently so that
+   * the section heading is always preserved as contextual metadata.
+   * A contextual prefix (document title + section heading) is prepended to
+   * the *embedded* text to improve vector similarity quality.
+   */
+  private chunkBySections(document: ParsedDocument, documentId: string): DocumentChunk[] {
+    const allChunks: DocumentChunk[] = [];
+    let globalIndex = 0;
+
+    const sections = document.sections!;
+    const totalSections = sections.length;
+
+    // First pass: collect all raw chunks from all sections
+    const sectionChunks: Array<{ sectionIdx: number; rawChunks: string[] }> = sections.map(
+      (section, sectionIdx) => ({
+        sectionIdx,
+        rawChunks: this.createChunks(section.content),
+      })
+    );
+
+    const totalChunks = sectionChunks.reduce((s, c) => s + c.rawChunks.length, 0);
+
+    for (const { sectionIdx, rawChunks } of sectionChunks) {
+      const section = sections[sectionIdx];
+      const headingHierarchy = this.buildHeadingHierarchy(sections, sectionIdx);
+
+      // Context prefix that rides alongside the chunk for better embeddings
+      const contextPrefix = `[Tài liệu: ${document.metadata.title} | Phần: ${section.heading}]`;
+
+      for (const rawContent of rawChunks) {
+        // The stored content is plain so it renders cleanly in the UI
+        // context_prefix is stored separately and prepended only at embedding time
+        allChunks.push({
+          content: rawContent,
+          metadata: {
+            document_id: documentId,
+            chunk_index: globalIndex,
+            total_chunks: totalChunks,
+            section_title: section.heading,
+            start_page: section.page_estimate,
+            token_count: tokenizer.countTokens(rawContent),
+            heading_hierarchy: headingHierarchy,
+            context_prefix: contextPrefix,
+          },
+        });
+        globalIndex++;
+      }
+    }
+
+    return allChunks;
+  }
+
+  /**
+   * Build the heading breadcrumb for a section by looking at ancestor headings.
+   */
+  private buildHeadingHierarchy(
+    sections: ParsedDocument['sections'] & {},
+    currentIdx: number
+  ): string[] {
+    const current = sections[currentIdx];
+    const hierarchy: string[] = [];
+
+    for (let i = currentIdx - 1; i >= 0; i--) {
+      if (sections[i].level < current.level) {
+        hierarchy.unshift(sections[i].heading);
+        if (sections[i].level === 1) break;
+      }
+    }
+
+    hierarchy.push(current.heading);
+    return hierarchy;
+  }
+
+  /**
+   * Flat (legacy) chunking for documents without section structure.
+   */
+  private chunkFlat(document: ParsedDocument, documentId: string): DocumentChunk[] {
+    const chunks = this.createChunks(document.content);
+    const contextPrefix = `[Tài liệu: ${document.metadata.title}]`;
+
+    return chunks.map((content, index) => ({
       content,
       metadata: {
         document_id: documentId,
         chunk_index: index,
         total_chunks: chunks.length,
         token_count: tokenizer.countTokens(content),
+        context_prefix: contextPrefix,
       },
     }));
-
-    logger.info('Document chunked successfully', {
-      documentId,
-      totalChunks: documentChunks.length,
-      avgTokens: Math.round(
-        documentChunks.reduce((sum, c) => sum + c.metadata.token_count, 0) / documentChunks.length
-      ),
-    });
-
-    return documentChunks;
   }
 
   /**

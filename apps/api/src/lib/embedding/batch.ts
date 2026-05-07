@@ -169,7 +169,11 @@ export class BatchEmbeddingProcessor {
   }
 
   /**
-   * Generate embeddings for document chunks
+   * Generate embeddings for document chunks.
+   * If a chunk has a context_prefix, that prefix is prepended to the text
+   * before embedding (Anthropic contextual-retrieval technique) so that the
+   * vector captures document/section context.  The stored chunk content
+   * itself remains unchanged.
    */
   async embedChunks(
     chunks: DocumentChunk[],
@@ -178,7 +182,12 @@ export class BatchEmbeddingProcessor {
   ): Promise<Array<{ chunk: DocumentChunk; embedding: number[] }>> {
     logger.info('Embedding document chunks', { count: chunks.length });
 
-    const texts = chunks.map(c => c.content);
+    // Build the text that will actually be embedded (prefix + content)
+    const texts = chunks.map((c) => {
+      const prefix = c.metadata.context_prefix;
+      return prefix ? `${prefix}\n\n${c.content}` : c.content;
+    });
+
     const batchResult = await this.generateBatch(texts, showProgress, onProgress);
 
     if (batchResult.failed_indices && batchResult.failed_indices.length > 0) {

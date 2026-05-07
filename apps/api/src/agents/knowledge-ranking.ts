@@ -5,7 +5,10 @@ export interface KnowledgeDocument {
   content: string;
   effective_date: string;
   status: string;
+  section_title?: string;
   similarity?: number;
+  bm25_score?: number;
+  rrf_score?: number;
   lexical_score?: number;
   matched_terms?: string[];
 }

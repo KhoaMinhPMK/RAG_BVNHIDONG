@@ -9,6 +9,11 @@ import {
   rankKnowledgeDocuments,
   type KnowledgeDocument,
 } from './knowledge-ranking.js';
+import { rewriteQuery, translateToEnglish } from '../lib/query/rewriter.js';
+import { generateMultiQuery, rrfMerge } from '../lib/query/multi-query.js';
+import { generateHypotheticalDocument } from '../lib/query/hyde.js';
+import { rerankDocuments } from '../lib/reranking/cross-encoder.js';
+import { checkFaithfulness } from '../lib/faithfulness/checker.js';
 
 interface KnowledgeAgentRequest {
   query: string;
@@ -140,55 +145,185 @@ QUY TẮC BẮT BUỘC:
 - Trích dẫn: [Tài liệu 1], [Tài liệu 2]...`;
 
   /**
-   * Generate embedding for query text
+   * Generate embedding for any text
    */
-  private async generateQueryEmbedding(query: string): Promise<number[]> {
+  private async generateQueryEmbedding(text: string): Promise<number[]> {
     const { embeddingClient } = await import('../lib/embedding/client.js');
-    const result = await embeddingClient.generateEmbedding(query);
+    const result = await embeddingClient.generateEmbedding(text);
     return result.embedding;
   }
 
   /**
-   * Retrieve relevant chunks using vector similarity search
-   * Falls back to text search if vector search fails
+   * Run hybrid RRF search for a single query string.
+   * Returns raw ranked KnowledgeDocument array (before final reranking).
+   * @param query       - Original/rewritten query (Vietnamese ok) for vector embedding
+   * @param bm25Query   - English translation of query for BM25 lexical search
+   */
+  private async hybridSearchForQuery(
+    query: string,
+    candidateCount: number,
+    bm25Query?: string
+  ): Promise<KnowledgeDocument[]> {
+    const queryEmbedding = await this.generateQueryEmbedding(query);
+    // Use English translation for BM25 if provided, else fallback to original
+    const lexicalQuery = bm25Query ?? query;
+
+    const { data: hybridData, error: hybridError } = await supabase.rpc(
+      'hybrid_search_chunks',
+      {
+        query_embedding: queryEmbedding,
+        query_text: lexicalQuery,
+        match_threshold: 0.4,
+        vector_weight: 0.6,
+        bm25_weight: 0.4,
+        match_count: candidateCount,
+        rrf_k: 60,
+      }
+    );
+
+    if (hybridError || !hybridData) {
+      logger.warn('hybrid_search_chunks failed for query variant', {
+        query,
+        error: hybridError?.message,
+      });
+      // Fallback: pure vector
+      return this.retrieveVectorMatches(query, candidateCount);
+    }
+
+    return this.enrichWithDocumentMeta(
+      hybridData as Array<{
+        document_id: string;
+        content: string;
+        metadata: Record<string, any>;
+        vector_score: number;
+        bm25_score: number;
+        rrf_score: number;
+      }>,
+      query
+    );
+  }
+
+  /**
+   * Full retrieval pipeline:
+   *   1. Query rewriting
+   *   2. Multi-query generation
+   *   3. HyDE passage generation
+   *   4. Parallel hybrid RRF search for each query variant
+   *   5. Merge results with RRF
+   *   6. Final ranking
    */
   private async retrieveDocuments(
-    query: string,
+    originalQuery: string,
     maxResults: number = 5
   ): Promise<KnowledgeDocument[]> {
-    const rawMatchCount = Math.max(maxResults * 5, maxResults);
+    const candidateCount = Math.max(maxResults * 4, 20);
 
-    try {
-      const [vectorMatches, lexicalMatches] = await Promise.all([
-        this.retrieveVectorMatches(query, rawMatchCount),
-        this.retrieveLexicalMatches(query, rawMatchCount),
-      ]);
+    // Step 1: rewrite query, generate variants, HyDE, AND translate to English (for BM25) — all parallel
+    const [rewritten, multiQueryVariants, hydePassage, englishQuery] = await Promise.all([
+      rewriteQuery(originalQuery),
+      generateMultiQuery(originalQuery, 3),
+      generateHypotheticalDocument(originalQuery),
+      translateToEnglish(originalQuery),  // translate once for BM25 lexical matching
+    ]);
 
-      const combinedMatches = [...vectorMatches, ...lexicalMatches];
+    // Deduplicate query strings
+    const querySet = new Set<string>([originalQuery, rewritten, ...multiQueryVariants]);
+    if (hydePassage) querySet.add(hydePassage);
+    const queries = Array.from(querySet).slice(0, 6); // cap at 6 to control latency
 
-      if (combinedMatches.length === 0) {
-        logger.warn('No hybrid retrieval results', { query });
-        return [];
-      }
+    logger.info('Query intelligence expansion', {
+      original: originalQuery,
+      rewritten,
+      englishBM25: englishQuery,
+      variants: multiQueryVariants.length,
+      hydePassage: hydePassage ? hydePassage.slice(0, 60) + '…' : null,
+      totalQueries: queries.length,
+    });
 
-      const rankedDocuments = rankKnowledgeDocuments(query, combinedMatches, maxResults);
+    // Step 2: run hybrid search for all query variants in parallel
+    // Each variant uses its own text for vector embedding, but shares the English translation for BM25
+    const resultsPerQuery = await Promise.allSettled(
+      queries.map((q) => this.hybridSearchForQuery(q, candidateCount, englishQuery))
+    );
 
-      logger.info('Hybrid retrieval results', {
-        vectorCandidates: vectorMatches.length,
-        lexicalCandidates: lexicalMatches.length,
-        combinedCandidates: combinedMatches.length,
-        uniqueDocuments: rankedDocuments.length,
-        query,
+    const successfulLists = resultsPerQuery
+      .filter((r): r is PromiseFulfilledResult<KnowledgeDocument[]> => r.status === 'fulfilled')
+      .map((r) => r.value)
+      .filter((list) => list.length > 0);
+
+    if (successfulLists.length === 0) {
+      logger.warn('All query variants returned 0 results, falling back to lexical', {
+        originalQuery,
       });
-
-      return rankedDocuments;
-    } catch (err) {
-      logger.error('Document retrieval exception', { error: err });
-      return this.retrieveLexicalMatches(query, rawMatchCount).then((matches) =>
-        rankKnowledgeDocuments(query, matches, maxResults)
-      );
+      const lexical = await this.retrieveLexicalMatches(originalQuery, candidateCount);
+      return rankKnowledgeDocuments(originalQuery, lexical, maxResults);
     }
+
+    // Step 3: merge with RRF — pass the array of ranked lists, not the flat array
+    const merged = rrfMerge(successfulLists, 60);
+
+    logger.info('Multi-query RRF merge', {
+      inputLists: successfulLists.length,
+      mergedCandidates: merged.length,
+    });
+
+    // Step 4: heuristic ranking to narrow down candidates
+    const heuristicTop = rankKnowledgeDocuments(originalQuery, merged, Math.min(merged.length, 20));
+
+    // Step 5: neural cross-encoder reranking on top-20 candidates → final top-N
+    const reranked = await rerankDocuments(originalQuery, heuristicTop, maxResults);
+    return reranked;
   }
+
+
+  /**
+   * Enrich hybrid RPC rows with document metadata (title, version, status…)
+   */
+  private async enrichWithDocumentMeta(
+    rows: Array<{
+      document_id: string;
+      content: string;
+      metadata: Record<string, any>;
+      vector_score: number;
+      bm25_score: number;
+      rrf_score: number;
+    }>,
+    query: string
+  ): Promise<KnowledgeDocument[]> {
+    const docIds = Array.from(new Set(rows.map((r) => r.document_id)));
+
+    const { data: docsMeta, error } = await supabase
+      .from('documents')
+      .select('id, title, version, effective_date, status')
+      .in('id', docIds)
+      .eq('status', 'active');
+
+    if (error || !docsMeta) return [];
+
+    const metaMap = new Map(docsMeta.map((d) => [d.id, d]));
+    const searchTerms = this.extractFallbackTerms(query);
+
+    return rows
+      .map((row) => {
+        const meta = metaMap.get(row.document_id);
+        if (!meta) return null;
+        return {
+          document_id: row.document_id,
+          title: meta.title,
+          version: meta.version,
+          content: row.content,
+          effective_date: meta.effective_date ?? '',
+          status: meta.status,
+          section_title: row.metadata?.section_title as string | undefined,
+          similarity: row.vector_score,
+          bm25_score: row.bm25_score,
+          rrf_score: row.rrf_score,
+          ...annotateLexicalSignals(meta.title, row.content, searchTerms),
+        } as KnowledgeDocument;
+      })
+      .filter((d): d is KnowledgeDocument => d !== null);
+  }
+
 
   /**
    * Dense retrieval using vector similarity search
@@ -419,7 +554,38 @@ QUY TẮC BẮT BUỘC:
         };
       }
 
-      // Step 5: Build citations
+      // Step 5: Faithfulness check — verify answer is grounded in retrieved context
+      const contextForCheck = documents
+        .map((d, i) => `[Tài liệu ${i + 1}: ${d.title}]\n${d.content.slice(0, 1200)}`)
+        .join('\n\n');
+
+      const faithfulness = await checkFaithfulness(request.query, answer, contextForCheck);
+
+      if (faithfulness.verdict === 'UNSUPPORTED') {
+        logger.warn('Faithfulness check failed — refusing answer', {
+          score: faithfulness.score,
+          reasoning: faithfulness.reasoning,
+          query: request.query,
+        });
+        return {
+          answer:
+            'Câu trả lời được tạo ra không đủ căn cứ từ tài liệu nội bộ. ' +
+            'Vui lòng tham khảo trực tiếp tài liệu hoặc liên hệ chuyên gia y tế.',
+          citations: documents.map((doc) => ({
+            document_id: doc.document_id,
+            document_title: doc.title,
+            version: doc.version,
+            effective_date: doc.effective_date,
+            excerpt: doc.content.slice(0, 300) + '...',
+            status: doc.status as 'active' | 'superseded' | 'retired',
+          })),
+          model_version: model || provider,
+          timestamp: new Date().toISOString(),
+          status: 'insufficient_evidence',
+        };
+      }
+
+      // Step 6: Build citations
       const citations: Citation[] = documents.map((doc) => ({
         document_id: doc.document_id,
         document_title: doc.title,

@@ -12,6 +12,8 @@
     "seed": "tsx src/scripts/seed-episodes.ts",
     "backfill:artifacts": "tsx src/scripts/backfill-document-artifacts.ts",
     "benchmark:retrieval": "tsx src/scripts/benchmark-knowledge-ranking.ts",
+    "eval:rag": "tsx src/scripts/eval-rag.ts",
+    "eval:rag:json": "tsx src/scripts/eval-rag.ts --json",
     "test:detection": "tsx src/scripts/test-detection.ts",
     "test:knowledge": "tsx src/scripts/test-knowledge.ts",
     "test": "vitest --run",

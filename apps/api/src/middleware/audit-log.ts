@@ -67,14 +67,16 @@ export function auditLog() {
 
       const auditEntry: AuditLogEntry = {
         timestamp: new Date().toISOString(),
-        userId: (req as any).user?.id,
+        userId: req.userId || (req as any).user?.id || (req as any).user?.sub,
         action: getActionFromMethod(req.method),
         resource: getResourceFromPath(req.path),
-        resourceId: req.params.id,
+        resourceId: typeof req.params.id === 'string' ? req.params.id : undefined,
         method: req.method,
         path: req.path,
         ip: req.ip || req.socket.remoteAddress || 'unknown',
-        userAgent: req.headers['user-agent'] || 'unknown',
+        userAgent: Array.isArray(req.headers['user-agent'])
+          ? req.headers['user-agent'].join(', ')
+          : req.headers['user-agent'] || 'unknown',
         statusCode: res.statusCode,
         metadata: {
           duration,

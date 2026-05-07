@@ -8,6 +8,10 @@
 import { EmbeddingRequest, EmbeddingResponse } from '../ingestion/types.js';
 import { logger } from '../utils/logger.js';
 
+interface OllamaEmbeddingApiResponse {
+  embedding?: number[];
+}
+
 // ============================================================================
 // Embedding Client Class
 // ============================================================================
@@ -46,7 +50,7 @@ export class EmbeddingClient {
         throw new Error(`Ollama API error: ${response.status} ${errorText}`);
       }
 
-      const data = await response.json();
+      const data = await response.json() as OllamaEmbeddingApiResponse;
 
       if (!data.embedding || !Array.isArray(data.embedding)) {
         throw new Error('Invalid embedding response from Ollama');

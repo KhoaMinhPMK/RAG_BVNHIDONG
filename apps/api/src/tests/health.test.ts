@@ -16,6 +16,17 @@ vi.mock('../lib/ollama/client.js', () => ({
   },
 }));
 
+vi.mock('../lib/embedding/client.js', () => ({
+  embeddingClient: {
+    testConnection: vi.fn().mockResolvedValue(true),
+    getEmbeddingDimension: vi.fn().mockResolvedValue(768),
+  },
+}));
+
+vi.mock('../lib/llm/unified.js', () => ({
+  testLLMProvider: vi.fn().mockResolvedValue({ ok: true, model: 'mimo-v2.5-pro' }),
+}));
+
 vi.mock('../lib/ingestion/service.js', () => ({
   ingestionService: {
     ingestDocument: vi.fn(),
@@ -42,7 +53,10 @@ describe('Health Check API', () => {
     expect(response.body).toHaveProperty('timestamp');
     expect(response.body).toHaveProperty('services');
     expect(response.body.services).toHaveProperty('supabase');
+    expect(response.body.services).toHaveProperty('cae');
     expect(response.body.services).toHaveProperty('ollama');
+    expect(response.body.services).toHaveProperty('mimo');
+    expect(response.body.services).toHaveProperty('embedding');
   });
 
   it('should return API info', async () => {

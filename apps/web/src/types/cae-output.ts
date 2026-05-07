@@ -14,8 +14,11 @@ export type RenderableBlock =
   | ParagraphBlock
   | BulletListBlock
   | WarningBlock
+  | DecisionCardBlock
   | TableBlock
+  | ComparisonTableBlock
   | EvidenceDigestBlock
+  | PatchGroupBlock
   | FieldPatchBlock;
 
 export interface SummaryBlock {
@@ -39,10 +42,30 @@ export interface WarningBlock {
   text: string;
 }
 
+export interface DecisionCardBlock {
+  type: 'decision_card';
+  title: string;
+  status: 'supported' | 'review' | 'blocked';
+  summary: string;
+  bullets?: string[];
+  citations: string[];
+}
+
 export interface TableBlock {
   type: 'table';
   columns: string[];
   rows: string[][];
+}
+
+export interface ComparisonTableBlock {
+  type: 'comparison_table';
+  title?: string;
+  columns: string[];
+  rows: Array<{
+    label: string;
+    values: string[];
+    tone?: 'neutral' | 'positive' | 'warning';
+  }>;
 }
 
 export interface EvidenceDigestBlock {
@@ -55,10 +78,40 @@ export interface EvidenceDigestBlock {
   }>;
 }
 
+export interface PatchGroupBlock {
+  type: 'patch_group';
+  title: string;
+  summary: {
+    ready: number;
+    review: number;
+    blocked: number;
+  };
+  patches: Array<{
+    patchId: string;
+    fieldKey: string;
+    label: string;
+    status: 'valid' | 'needs_review' | 'policy_blocked';
+    source: 'ai' | 'manual' | 'locked';
+    confidence: number;
+    citations: string[];
+  }>;
+}
+
+export interface DraftFieldProvenance {
+  document_id: string;
+  document_title: string;
+  version?: string;
+  effective_date?: string;
+  excerpt: string;
+}
+
 export interface FieldPatchBlock {
   type: 'field_patch';
   patchId: string;
   fieldKey: string;
+  label?: string;
+  source?: 'ai' | 'manual' | 'locked';
+  status?: 'valid' | 'needs_review' | 'policy_blocked';
   diff: {
     before: string;
     after: string;
@@ -66,6 +119,7 @@ export interface FieldPatchBlock {
   rationale: string;
   confidence: number;
   citations: string[];
+  provenance?: DraftFieldProvenance[];
 }
 
 // ============================================================================

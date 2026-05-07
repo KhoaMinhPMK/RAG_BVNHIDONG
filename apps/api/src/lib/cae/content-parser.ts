@@ -36,7 +36,48 @@ export function parseContentToBlocks(
   let blockIndex = 0;
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    const line = normalizeMarkdownLine(lines[i]);
+
+    if (!line || line.startsWith('<|')) {
+      if (currentBlockText) {
+        blocks.push(createParagraphBlock(currentBlockText));
+      }
+      break;
+    }
+
+    if (looksLikeTableLine(line) && i + 1 < lines.length && looksLikeTableLine(lines[i + 1])) {
+      if (currentBlockText) {
+        blocks.push(createParagraphBlock(currentBlockText));
+        blockIndex++;
+        currentBlockText = '';
+      }
+
+      const tableLines = [line];
+      while (i + 1 < lines.length && looksLikeTableLine(lines[i + 1])) {
+        i++;
+        tableLines.push(normalizeMarkdownLine(lines[i]));
+      }
+
+      const tableBlock = parseTable(tableLines.join('\n'));
+      if (tableBlock) {
+        blocks.push(tableBlock);
+        blockIndex++;
+        continue;
+      }
+    }
+
+    if (line.match(/^#{1,6}\s/)) {
+      if (currentBlockText) {
+        blocks.push(createParagraphBlock(currentBlockText));
+        blockIndex++;
+        currentBlockText = '';
+      }
+
+      const headingText = normalizeMarkdownLine(line.replace(/^#{1,6}\s+/, ''));
+      blocks.push(blocks.length === 0 ? { type: 'summary', text: headingText } : createParagraphBlock(headingText));
+      blockIndex++;
+      continue;
+    }
 
     // Detect warnings (lines starting with ⚠, WARNING, CAUTION, etc.)
     if (line.match(/^(⚠|WARNING|CAUTION|⚡|CRITICAL)/i)) {
@@ -57,19 +98,19 @@ export function parseContentToBlocks(
     }
 
     // Detect bullet lists (lines starting with -, *, •)
-    if (line.match(/^[-*•]\s/)) {
+    if (line.match(/^[-*•]\s|^\d+\.\s/)) {
       if (currentBlockText) {
         blocks.push(createParagraphBlock(currentBlockText));
         blockIndex++;
         currentBlockText = '';
       }
 
-      const items: string[] = [line.replace(/^[-*•]\s/, '')];
+      const items: string[] = [line.replace(/^[-*•]\s|^\d+\.\s/, '')];
 
       // Collect consecutive bullet points
-      while (i + 1 < lines.length && lines[i + 1].match(/^[-*•]\s/)) {
+      while (i + 1 < lines.length && normalizeMarkdownLine(lines[i + 1]).match(/^[-*•]\s|^\d+\.\s/)) {
         i++;
-        items.push(lines[i].replace(/^[-*•]\s/, ''));
+        items.push(normalizeMarkdownLine(lines[i]).replace(/^[-*•]\s|^\d+\.\s/, ''));
       }
 
       blocks.push({ type: 'bullet_list', items });
@@ -114,6 +155,18 @@ export function parseContentToBlocks(
 
 function createParagraphBlock(text: string): RenderableBlock {
   return { type: 'paragraph', text };
+}
+
+function looksLikeTableLine(line: string): boolean {
+  return line.includes('|') && line.split('|').filter(Boolean).length >= 2;
+}
+
+function normalizeMarkdownLine(line: string): string {
+  return line
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^>\s*/, '')
+    .trim();
 }
 
 /**

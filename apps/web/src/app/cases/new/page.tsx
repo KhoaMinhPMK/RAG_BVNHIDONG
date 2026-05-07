@@ -4,6 +4,7 @@ import { useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Upload, ImageIcon, X, Check, ChevronRight, Loader2, File } from 'lucide-react';
+import { createEpisode } from '@/lib/api/client';
 import { PageTransition } from '@/components/ui/page-transition';
 import { FileItemSkeleton, ProgressSkeleton } from '@/components/ui/loading-skeleton';
 
@@ -85,33 +86,51 @@ export default function NewCasePage() {
     addFiles(e.dataTransfer.files);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (!activeFile) return;
+    const { info } = activeFile;
+    if (!info.pid || !info.date) {
+      setUploadError('Vui lòng điền Mã BN và Ngày nhập viện.');
+      return;
+    }
     setSubmitting(true);
     setUploadStatus('uploading');
-    setUploadProgress(0);
+    setUploadProgress(30);
     setUploadError(null);
 
-    // Simulate upload progress
-    const interval = setInterval(() => {
-      setUploadProgress(prev => {
-        if (prev === null) return 0;
-        if (prev >= 100) {
-          clearInterval(interval);
-          setUploadStatus('processing');
-          // Simulate processing after upload complete
-          setTimeout(() => {
-            setUploadStatus('done');
-            router.push('/cases/EP-2024-010?step=detection');
-          }, 800);
-          return 100;
-        }
-        return prev + 5;
+    try {
+      const res = await createEpisode({
+        patient_ref: info.pid,
+        age: info.age || undefined,
+        gender: info.gender || undefined,
+        date: info.date,
+        symptoms: info.symptoms || undefined,
+        spo2: info.spo2 || undefined,
+        crp: info.crp || undefined,
       });
-    }, 80);
+
+      setUploadProgress(100);
+      if (res.success && res.episode) {
+        setUploadStatus('done');
+        setTimeout(() => {
+          router.push(`/cases/${res.episode.episode_id}?step=detection`);
+        }, 400);
+      } else {
+        setUploadStatus('error');
+        setUploadError(res.error?.message || 'Không thể tạo ca. Vui lòng thử lại.');
+        setSubmitting(false);
+      }
+    } catch {
+      setUploadStatus('error');
+      setUploadError('Lỗi kết nối tới server. Vui lòng thử lại.');
+      setSubmitting(false);
+      setUploadProgress(null);
+    }
   };
 
   const activeFile = files.find(f => f.id === activeId);
   const info = activeFile?.info;
+  const getInfoValue = (field: keyof PatientInfo) => info?.[field] ?? '';
 
   return (
     <PageTransition>
@@ -287,7 +306,7 @@ export default function NewCasePage() {
                     ].map(({ key, label, placeholder, type }) => (
                       <div key={key}>
                         <label className="text-[10px] font-medium text-text-tertiary block mb-1">{label}</label>
-                        <input type={type ?? 'text'} value={(info as Record<string, string>)[key] ?? ''}
+                        <input type={type ?? 'text'} value={getInfoValue(key as keyof PatientInfo)}
                           onChange={e => updateInfo(activeFile.id, { [key]: e.target.value } as Partial<PatientInfo>)}
                           placeholder={placeholder}
                           className="w-full text-xs border border-border rounded-sm px-2.5 py-1.5 bg-background focus:outline-none focus:border-brand-primary text-text-primary placeholder:text-text-tertiary"
@@ -331,7 +350,7 @@ export default function NewCasePage() {
                       <div key={key}>
                         <label className="text-[10px] font-medium text-text-tertiary block mb-1">{label}</label>
                         <div className="relative">
-                          <input value={(info as Record<string, string>)[key] ?? ''}
+                          <input value={getInfoValue(key as keyof PatientInfo)}
                             onChange={e => updateInfo(activeFile.id, { [key]: e.target.value } as Partial<PatientInfo>)}
                             placeholder={placeholder}
                             className="w-full text-xs border border-border rounded-sm px-2.5 py-1.5 pr-8 bg-background focus:outline-none focus:border-brand-primary text-text-primary placeholder:text-text-tertiary"
@@ -355,7 +374,7 @@ export default function NewCasePage() {
                       <div key={key}>
                         <label className="text-[10px] font-medium text-text-tertiary block mb-1">{label}</label>
                         <div className="relative">
-                          <input value={(info as Record<string, string>)[key] ?? ''}
+                          <input value={getInfoValue(key as keyof PatientInfo)}
                             onChange={e => updateInfo(activeFile.id, { [key]: e.target.value } as Partial<PatientInfo>)}
                             placeholder={placeholder}
                             className="w-full text-xs border border-border rounded-sm px-2.5 py-1.5 pr-16 bg-background focus:outline-none focus:border-brand-primary text-text-primary placeholder:text-text-tertiary"
@@ -398,6 +417,7 @@ export default function NewCasePage() {
             </div>
           )}
         </div>
+      </div>
       </div>
     </PageTransition>
   );

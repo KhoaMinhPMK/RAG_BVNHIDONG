@@ -2,7 +2,7 @@
 
 ## Overview
 
-MiMo API integration cho phép sử dụng các mô hình LLM từ xiaomimomo.com như một alternative/fallback cho Ollama local models.
+MiMo API integration cho phép sử dụng các mô hình LLM từ xiaomimimo.com như một alternative/fallback cho Ollama local models.
 
 ## Features
 
@@ -22,11 +22,11 @@ Add to `apps/api/.env`:
 ```env
 # MiMo API
 MIMO_API_KEY=tp-your-actual-api-key-here
-MIMO_BASE_URL=https://token-plan-sgp.xiaomimomo.com/v1
-MIMO_MODEL_PRIMARY=MiMo-V2.5-Pro
-MIMO_MODEL_FALLBACK=MiMo-V2.5
-MIMO_MODEL_OMNI=MiMo-V2-Omni
-MIMO_MODEL_TTS=MiMo-V2.5-TTS
+MIMO_BASE_URL=https://api.xiaomimimo.com/v1
+MIMO_MODEL_PRIMARY=mimo-v2.5-pro
+MIMO_MODEL_FALLBACK=mimo-v2.5
+MIMO_MODEL_OMNI=mimo-v2-omni
+MIMO_MODEL_TTS=mimo-v2.5-tts
 ```
 
 ### 2. Test Connection
@@ -161,28 +161,29 @@ Schedule batch operations during off-peak for 20% savings.
 ### Health Check
 
 ```typescript
-const isHealthy = await client.healthCheck();
+const isHealthy = await client.isAvailable();
 ```
 
 ### Models List
 
 ```bash
-curl https://token-plan-sgp.xiaomimomo.com/v1/models \
-  -H "Authorization: Bearer $MIMO_API_KEY"
+curl https://api.xiaomimimo.com/v1/models \
+  -H "api-key: $MIMO_API_KEY"
 ```
 
 ### Chat Completion
 
 ```bash
-curl https://token-plan-sgp.xiaomimomo.com/v1/chat/completions \
+curl https://api.xiaomimimo.com/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $MIMO_API_KEY" \
+  -H "api-key: $MIMO_API_KEY" \
   -d '{
-    "model": "MiMo-V2.5-Pro",
+    "model": "mimo-v2.5-pro",
     "messages": [
       {"role": "user", "content": "Hello"}
     ],
-    "max_tokens": 100
+    "max_completion_tokens": 100,
+    "thinking": {"type": "disabled"}
   }'
 ```
 

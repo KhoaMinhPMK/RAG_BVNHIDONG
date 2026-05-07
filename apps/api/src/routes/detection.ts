@@ -17,7 +17,18 @@ router.post(
   requirePermission('episodes:update'),
   async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
+      const rawId = req.params.id;
+      const id = Array.isArray(rawId) ? rawId[0] : rawId;
+
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_INPUT',
+            message: 'Episode ID is required',
+          },
+        });
+      }
 
       logger.info('Triggering detection', {
         userId: req.userId,
@@ -133,7 +144,18 @@ router.get(
   requirePermission('episodes:read'),
   async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
+      const rawId = req.params.id;
+      const id = Array.isArray(rawId) ? rawId[0] : rawId;
+
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_INPUT',
+            message: 'Episode ID is required',
+          },
+        });
+      }
 
       logger.debug('Polling detection status', {
         userId: req.userId,

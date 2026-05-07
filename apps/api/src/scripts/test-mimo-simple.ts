@@ -9,7 +9,7 @@ async function testMiMoAPI() {
   console.log('🧪 Testing MiMo API...\n');
 
   const apiKey = process.env.MIMO_API_KEY;
-  const baseUrl = process.env.MIMO_BASE_URL || 'https://token-plan-sgp.xiaomimomo.com/v1';
+  const baseUrl = process.env.MIMO_BASE_URL || 'https://api.xiaomimimo.com/v1';
 
   if (!apiKey) {
     console.error('❌ MIMO_API_KEY not set');
@@ -26,7 +26,7 @@ async function testMiMoAPI() {
     const response = await fetch(`${baseUrl}/models`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        'api-key': apiKey,
       },
     });
 
@@ -51,15 +51,17 @@ async function testMiMoAPI() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'api-key': apiKey,
       },
       body: JSON.stringify({
-        model: 'MiMo-V2.5-Pro',
+        model: 'mimo-v2.5-pro',
         messages: [
           { role: 'user', content: 'Say hello in one sentence.' },
         ],
-        max_tokens: 50,
+        max_completion_tokens: 50,
         temperature: 0.7,
+        stream: false,
+        thinking: { type: 'disabled' },
       }),
     });
 

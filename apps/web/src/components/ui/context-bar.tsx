@@ -1,7 +1,7 @@
 'use client';
 
 import { ShieldCheck, Clock } from 'lucide-react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 
 const pageLabels: Record<string, { title: string; description: string }> = {
   '/':          { title: 'Worklist', description: 'Danh sách ca X-quang đang xử lý' },
@@ -10,10 +10,9 @@ const pageLabels: Record<string, { title: string; description: string }> = {
   '/admin':     { title: 'Quản trị', description: 'RBAC · Audit log · Cấu hình hệ thống' },
 };
 
-function getCaseLabel(pathname: string): { title: string; description: string } | null {
+function getCaseLabel(pathname: string, step: string | null): { title: string; description: string } | null {
   const match = pathname.match(/^\/cases\/([^/]+)/);
   if (!match || pathname === '/cases/new') return null;
-  const step = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('step');
   const stepLabel = step === 'explain' ? 'Bước 2: Giải thích' : step === 'draft' ? 'Bước 3: Báo cáo' : 'Bước 1: Phát hiện';
   return {
     title: match[1],
@@ -23,8 +22,9 @@ function getCaseLabel(pathname: string): { title: string; description: string } 
 
 export function ContextBar() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
 
-  const caseLabel = getCaseLabel(pathname);
+  const caseLabel = getCaseLabel(pathname, searchParams.get('step'));
   const page = caseLabel ?? pageLabels[pathname] ?? { title: pathname, description: '' };
 
   return (

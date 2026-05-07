@@ -13,9 +13,10 @@ import type { Role } from '../types/api.js';
  */
 
 interface JWTPayload {
+  id: string;
   sub: string; // user_id
   email: string;
-  role?: Role;
+  role: Role;
   aud: string;
   exp: number;
 }
@@ -41,6 +42,21 @@ export async function authenticateJWT(
   next: NextFunction
 ): Promise<void> {
   try {
+    // DEV BYPASS: Skip auth in development mode when SKIP_AUTH=true
+    if (process.env.NODE_ENV === 'development' && process.env.SKIP_AUTH === 'true') {
+      req.userId = 'dev-user-id';
+      req.userRole = 'clinician' as Role;
+      req.user = {
+        id: 'dev-user-id',
+        sub: 'dev-user-id',
+        email: 'dev@localhost',
+        role: 'clinician' as Role,
+        aud: 'authenticated',
+        exp: 0,
+      };
+      return next();
+    }
+
     // Extract token from Authorization header
     const authHeader = req.headers.authorization;
 
@@ -109,6 +125,7 @@ export async function authenticateJWT(
     req.userId = user.id;
     req.userRole = profile.role as Role;
     req.user = {
+      id: user.id,
       sub: user.id,
       email: user.email!,
       role: profile.role as Role,

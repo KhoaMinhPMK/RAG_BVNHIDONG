@@ -47,7 +47,7 @@ export class PDFParser {
       const metadata = await this.extractMetadata(filePath, content);
 
       // Calculate stats
-      const wordCount = content.split(/\s+/).filter(w => w.length > 0).length;
+      const wordCount = content.split(/\s+/).filter((w: string) => w.length > 0).length;
 
       logger.info('PDF parsed successfully', {
         filePath,

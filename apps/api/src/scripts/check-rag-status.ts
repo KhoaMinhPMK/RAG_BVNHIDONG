@@ -111,10 +111,19 @@ async function checkRAGStatus() {
 
     // 6. Check index
     console.log('\n📊 INDEXES:');
-    const { data: indexes, error: idxError } = await supabase.rpc('pg_indexes', {
-      schemaname: 'public',
-      tablename: 'chunks',
-    }).catch(() => ({ data: null, error: { message: 'pg_indexes not available' } }));
+    let indexes: Array<unknown> | null = null;
+    let idxError: { message: string } | null = null;
+
+    try {
+      const result = await supabase.rpc('pg_indexes', {
+        schemaname: 'public',
+        tablename: 'chunks',
+      });
+      indexes = (result.data as Array<unknown> | null) ?? null;
+      idxError = result.error ? { message: result.error.message } : null;
+    } catch {
+      idxError = { message: 'pg_indexes not available' };
+    }
 
     if (idxError || !indexes) {
       console.log(`⚠️  Cannot check indexes (requires admin access)`);

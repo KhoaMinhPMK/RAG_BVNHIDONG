@@ -53,6 +53,30 @@ export interface ChunkingOptions {
   preserve_paragraphs: boolean;
 }
 
+export type IngestionStatus =
+  | 'pending'
+  | 'parsing'
+  | 'chunking'
+  | 'embedding'
+  | 'storing'
+  | 'completed'
+  | 'failed';
+
+export interface IngestionProgressUpdate {
+  status: IngestionStatus;
+  progress: number;
+  document_id?: string;
+  total_chunks?: number;
+  processed_chunks?: number;
+  message?: string;
+}
+
+export interface IngestionSourceArtifact {
+  path: string;
+  original_name?: string;
+  managed?: boolean;
+}
+
 // ============================================================================
 // Embedding Types
 // ============================================================================
@@ -88,7 +112,7 @@ export interface BatchEmbeddingResponse {
 export interface IngestionJob {
   id: string;
   file_path: string;
-  status: 'pending' | 'parsing' | 'chunking' | 'embedding' | 'storing' | 'completed' | 'failed';
+  status: IngestionStatus;
   progress: number;
   total_chunks?: number;
   processed_chunks?: number;
@@ -112,6 +136,11 @@ export interface IngestionOptions {
   embedding_model?: string;
   batch_size?: number;
   skip_existing?: boolean;
+  metadataOverride?: Partial<DocumentMetadata>;
+  metadataPatch?: Record<string, any>;
+  existingDocumentId?: string;
+  sourceArtifact?: IngestionSourceArtifact;
+  progressCallback?: (update: IngestionProgressUpdate) => void | Promise<void>;
 }
 
 // ============================================================================

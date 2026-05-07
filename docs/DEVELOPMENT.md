@@ -1,3 +1,9 @@
+---
+noteId: "4d477190487411f1b8bd654e7b8dfd32"
+tags: []
+
+---
+
 # Development Environment Setup
 
 ## 📋 Overview

@@ -80,6 +80,8 @@ export interface Citation {
   excerpt: string;
   page?: number;
   url?: string;
+  source?: string;
+  similarity?: number;
   status?: 'active' | 'superseded' | 'retired';
 }
 

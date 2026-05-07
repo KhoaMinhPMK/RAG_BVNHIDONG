@@ -5,6 +5,7 @@ import { requirePermission } from '../middleware/rbac.js';
 import { guardrailsMiddleware } from '../middleware/guardrails.js';
 import { logger } from '../utils/logger.js';
 import type { QueryRequest, ApiResponse, QueryResponse } from '../types/api.js';
+import { saveQueryResult } from '../lib/ai-runs/service.js';
 
 const router = Router();
 
@@ -19,7 +20,7 @@ router.post(
   guardrailsMiddleware({ requireCitations: true }),
   async (req: Request, res: Response) => {
     try {
-      const { query, role, episode_id } = req.body as QueryRequest;
+      const { query, role, episode_id, provider } = req.body as QueryRequest & { provider?: 'ollama' | 'mimo' };
 
       // Validation
       if (!query || !role) {
@@ -32,19 +33,29 @@ router.post(
         });
       }
 
-      logger.info('Query request received', { query: query.slice(0, 100), role });
+      logger.info('Query request received', { query: query.slice(0, 100), role, provider });
 
       // Call Knowledge Agent
       const result = await knowledgeAgent.query({
         query,
         role,
         episode_id,
+        provider: provider || 'mimo',
       });
 
       const response: ApiResponse<QueryResponse> = {
         success: true,
         ...result,
       };
+
+      // Persist query result (fire-and-forget)
+      void saveQueryResult({
+        episode_id: episode_id ?? null,
+        query_text: query,
+        answer:     result.answer ?? '',
+        sources:    result.citations ?? [],
+        created_by: req.userId ?? null,
+      });
 
       res.json(response);
     } catch (error) {

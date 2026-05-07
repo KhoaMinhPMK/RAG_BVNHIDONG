@@ -3,13 +3,21 @@
  */
 
 import { useState, useRef, useCallback } from 'react';
-import type { RenderableBlock, CitationAnchor, CAESSEEvent } from '@/types/cae-output';
+import type { RenderableBlock, CitationAnchor, CAESSEEvent, DoneEvent, UIAction } from '@/types/cae-output';
 
-interface ExtendedCAESSEEvent extends CAESSEEvent {
-  blockType?: string;
-  blockIndex?: number;
-  block?: RenderableBlock;
-  citation?: CitationAnchor;
+interface CAEStreamContext {
+  findingIds?: string[];
+}
+
+interface CAEDetectionPayload {
+  image_id: string;
+  detections: Array<{
+    bbox: [number, number, number, number];
+    label: string;
+    score: number;
+  }>;
+  model_version?: string;
+  timestamp?: string;
 }
 
 interface ToolCall {
@@ -26,10 +34,13 @@ interface UseCAEStreamResult {
   content: string;
   blocks: RenderableBlock[];
   citations: CitationAnchor[];
+  actions: UIAction[];
   error: string | null;
   usage: { reasoning_tokens: number; completion_tokens: number; model: string } | null;
-  startBrief: (episodeId: string) => Promise<void>;
-  startChat: (episodeId: string, messages: Array<{ role: 'user' | 'assistant'; content: string }>) => Promise<void>;
+  startBrief: (episodeId: string, context?: CAEStreamContext) => Promise<void>;
+  startChat: (episodeId: string, messages: Array<{ role: 'user' | 'assistant'; content: string }>, context?: CAEStreamContext) => Promise<void>;
+  startExplain: (episodeId: string, detection: CAEDetectionPayload, context?: CAEStreamContext & { clinicalData?: Record<string, unknown> }) => Promise<void>;
+  startDraft: (episodeId: string, templateId: string, detection: CAEDetectionPayload, context?: CAEStreamContext & { clinicalData?: Record<string, unknown> }) => Promise<void>;
   abort: () => void;
   reset: () => void;
 }
@@ -47,7 +58,8 @@ async function consumeCAESSE(
     onBlockStart: (blockType: string, blockIndex: number) => void;
     onBlockDone: (blockIndex: number, block: RenderableBlock) => void;
     onCitation: (citation: CitationAnchor) => void;
-    onDone: (event: CAESSEEvent) => void;
+    onUIAction: (action: UIAction) => void;
+    onDone: (event: DoneEvent) => void;
     onError: (msg: string) => void;
   },
   signal: AbortSignal
@@ -79,7 +91,7 @@ async function consumeCAESSE(
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue;
       try {
-        const event: ExtendedCAESSEEvent = JSON.parse(line.slice(6));
+        const event: CAESSEEvent = JSON.parse(line.slice(6));
         switch (event.type) {
           case 'thinking':
             callbacks.onThinking(event.delta ?? '');
@@ -104,15 +116,18 @@ async function consumeCAESSE(
             }
             break;
           case 'citation':
-            if (event.citation) {
-              callbacks.onCitation(event.citation);
-            }
+            callbacks.onCitation(event.citation);
+            break;
+          case 'ui_action':
+            callbacks.onUIAction(event.action);
             break;
           case 'done':
             callbacks.onDone(event);
             break;
           case 'error':
             callbacks.onError(event.message ?? 'Lỗi không xác định');
+            break;
+          case 'block_content':
             break;
         }
       } catch {
@@ -129,12 +144,14 @@ export function useCAEStream(): UseCAEStreamResult {
   const [content, setContent] = useState('');
   const [blocks, setBlocks] = useState<RenderableBlock[]>([]);
   const [citations, setCitations] = useState<CitationAnchor[]>([]);
+  const [actions, setActions] = useState<UIAction[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState<{ reasoning_tokens: number; completion_tokens: number; model: string } | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const blocksRef = useRef<RenderableBlock[]>([]);
   const citationsRef = useRef<CitationAnchor[]>([]);
+  const actionsRef = useRef<UIAction[]>([]);
 
   const reset = useCallback(() => {
     setThinking('');
@@ -142,10 +159,12 @@ export function useCAEStream(): UseCAEStreamResult {
     setContent('');
     setBlocks([]);
     setCitations([]);
+    setActions([]);
     setError(null);
     setUsage(null);
     blocksRef.current = [];
     citationsRef.current = [];
+    actionsRef.current = [];
   }, []);
 
   const abort = useCallback(() => {
@@ -163,13 +182,17 @@ export function useCAEStream(): UseCAEStreamResult {
 
     abortControllerRef.current = new AbortController();
 
+    // Track whether the stream ended with a proper done/error event.
+    // If consumeCAESSE returns without either, the connection dropped mid-stream.
+    let streamCompleted = false;
+
     try {
       await consumeCAESSE(
         url,
         body,
         {
           onThinking: (delta) => setThinking((prev) => prev + delta),
-          onToolStart: (name, label, args) => {
+          onToolStart: (name, label, _args) => {
             setToolCalls((prev) => [...prev, { name, label, status: 'running' }]);
           },
           onToolDone: (name, preview) => {
@@ -178,10 +201,8 @@ export function useCAEStream(): UseCAEStreamResult {
             );
           },
           onContent: (delta) => setContent((prev) => prev + delta),
-          onBlockStart: (blockType, blockIndex) => {
-            // Block start event
-          },
-          onBlockDone: (blockIndex, block) => {
+          onBlockStart: (_blockType, _blockIndex) => {},
+          onBlockDone: (_blockIndex, block) => {
             blocksRef.current = [...blocksRef.current, block];
             setBlocks([...blocksRef.current]);
           },
@@ -189,7 +210,12 @@ export function useCAEStream(): UseCAEStreamResult {
             citationsRef.current = [...citationsRef.current, citation];
             setCitations([...citationsRef.current]);
           },
+          onUIAction: (action) => {
+            actionsRef.current = [...actionsRef.current, action];
+            setActions([...actionsRef.current]);
+          },
           onDone: (event) => {
+            streamCompleted = true;
             if (event.type === 'done') {
               setUsage({
                 reasoning_tokens: event.reasoning_tokens ?? 0,
@@ -200,12 +226,20 @@ export function useCAEStream(): UseCAEStreamResult {
             setIsStreaming(false);
           },
           onError: (msg) => {
+            streamCompleted = true;
             setError(msg);
             setIsStreaming(false);
           },
         },
         abortControllerRef.current.signal
       );
+
+      // If the SSE connection closed without a done/error event (server
+      // disconnect, timeout, proxy cut), ensure we always leave streaming state.
+      if (!streamCompleted) {
+        setError('Kết nối bị ngắt giữa chừng. Kiểm tra backend và thử lại.');
+        setIsStreaming(false);
+      }
     } catch (err) {
       if (err instanceof Error && err.name !== 'AbortError') {
         setError(err.message);
@@ -215,15 +249,60 @@ export function useCAEStream(): UseCAEStreamResult {
   }, [reset]);
 
   const startBrief = useCallback(
-    async (episodeId: string) => {
-      await startStream(`${API_BASE}/api/cae/brief`, { episode_id: episodeId });
+    async (episodeId: string, context?: CAEStreamContext) => {
+      await startStream(`${API_BASE}/api/cae/brief`, {
+        episode_id: episodeId,
+        finding_ids: context?.findingIds,
+      });
     },
     [startStream]
   );
 
   const startChat = useCallback(
-    async (episodeId: string, messages: Array<{ role: 'user' | 'assistant'; content: string }>) => {
-      await startStream(`${API_BASE}/api/cae/chat`, { episode_id: episodeId, messages });
+    async (
+      episodeId: string,
+      messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+      context?: CAEStreamContext
+    ) => {
+      await startStream(`${API_BASE}/api/cae/chat`, {
+        episode_id: episodeId,
+        messages,
+        finding_ids: context?.findingIds,
+      });
+    },
+    [startStream]
+  );
+
+  const startExplain = useCallback(
+    async (
+      episodeId: string,
+      detection: CAEDetectionPayload,
+      context?: CAEStreamContext & { clinicalData?: Record<string, unknown> }
+    ) => {
+      await startStream(`${API_BASE}/api/cae/explain`, {
+        episode_id: episodeId,
+        detection,
+        finding_ids: context?.findingIds,
+        clinical_data: context?.clinicalData,
+      });
+    },
+    [startStream]
+  );
+
+  const startDraft = useCallback(
+    async (
+      episodeId: string,
+      templateId: string,
+      detection: CAEDetectionPayload,
+      context?: CAEStreamContext & { clinicalData?: Record<string, unknown> }
+    ) => {
+      await startStream(`${API_BASE}/api/cae/draft`, {
+        episode_id: episodeId,
+        template_id: templateId,
+        detection,
+        finding_ids: context?.findingIds,
+        clinical_data: context?.clinicalData,
+      });
     },
     [startStream]
   );
@@ -235,10 +314,13 @@ export function useCAEStream(): UseCAEStreamResult {
     content,
     blocks,
     citations,
+    actions,
     error,
     usage,
     startBrief,
     startChat,
+    startExplain,
+    startDraft,
     abort,
     reset,
   };

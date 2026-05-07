@@ -6,7 +6,7 @@ import {
   Loader2, MessageSquare, RefreshCw, Send, Volume2, Zap,
 } from 'lucide-react';
 import { BlockRenderer } from './BlockRenderer';
-import type { RenderableBlock, CitationAnchor, CAESSEEvent } from '@/types/cae-output';
+import type { RenderableBlock, CitationAnchor, CAESSEEvent, DoneEvent } from '@/types/cae-output';
 
 type CAEMode = 'auto' | 'chat';
 type CAEStep = 'detection' | 'explain' | 'draft';
@@ -23,14 +23,6 @@ interface ChatMessage {
   content: string;
   blocks?: RenderableBlock[];
   citations?: CitationAnchor[];
-}
-
-// Extend CAESSEEvent type to include structured block events
-interface ExtendedCAESSEEvent extends CAESSEEvent {
-  blockType?: string;
-  blockIndex?: number;
-  block?: RenderableBlock;
-  citation?: CitationAnchor;
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
@@ -71,7 +63,7 @@ async function consumeCAESSE(
     onBlockStart: (blockType: string, blockIndex: number) => void;
     onBlockDone: (blockIndex: number, block: RenderableBlock) => void;
     onCitation: (citation: CitationAnchor) => void;
-    onDone: (event: CAESSEEvent) => void;
+    onDone: (event: DoneEvent) => void;
     onError: (msg: string) => void;
   },
   signal: AbortSignal
@@ -103,7 +95,7 @@ async function consumeCAESSE(
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue;
       try {
-        const event: ExtendedCAESSEEvent = JSON.parse(line.slice(6));
+        const event: CAESSEEvent = JSON.parse(line.slice(6));
         switch (event.type) {
           case 'thinking':
             callbacks.onThinking(event.delta ?? '');
@@ -128,15 +120,16 @@ async function consumeCAESSE(
             }
             break;
           case 'citation':
-            if (event.citation) {
-              callbacks.onCitation(event.citation);
-            }
+            callbacks.onCitation(event.citation);
             break;
           case 'done':
             callbacks.onDone(event);
             break;
           case 'error':
             callbacks.onError(event.message ?? 'Lỗi không xác định');
+            break;
+          case 'ui_action':
+          case 'block_content':
             break;
         }
       } catch {

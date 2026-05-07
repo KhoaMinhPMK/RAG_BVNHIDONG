@@ -34,7 +34,8 @@ export class BatchEmbeddingProcessor {
    */
   async generateBatch(
     texts: string[],
-    showProgress: boolean = true
+    showProgress: boolean = true,
+    onProgress?: (processed: number, total: number) => void | Promise<void>
   ): Promise<BatchEmbeddingResponse> {
     logger.info('Starting batch embedding generation', {
       totalTexts: texts.length,
@@ -71,6 +72,8 @@ export class BatchEmbeddingProcessor {
       if (progressBar) {
         progressBar.update(i + batch.length);
       }
+
+      await onProgress?.(i + batch.length, texts.length);
 
       // Rate limiting delay between batches
       if (i + this.batchSize < texts.length) {
@@ -170,12 +173,13 @@ export class BatchEmbeddingProcessor {
    */
   async embedChunks(
     chunks: DocumentChunk[],
-    showProgress: boolean = true
+    showProgress: boolean = true,
+    onProgress?: (processed: number, total: number) => void | Promise<void>
   ): Promise<Array<{ chunk: DocumentChunk; embedding: number[] }>> {
     logger.info('Embedding document chunks', { count: chunks.length });
 
     const texts = chunks.map(c => c.content);
-    const batchResult = await this.generateBatch(texts, showProgress);
+    const batchResult = await this.generateBatch(texts, showProgress, onProgress);
 
     if (batchResult.failed_indices && batchResult.failed_indices.length > 0) {
       logger.warn('Some chunks failed to embed', {

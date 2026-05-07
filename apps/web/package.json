@@ -2,6 +2,7 @@
   "name": "webrag-web",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "yarn@3.6.4",
   "scripts": {
     "dev": "next dev -p 3001",
     "build": "next build",
@@ -13,10 +14,13 @@
     "test:ui": "vitest --ui"
   },
   "dependencies": {
+    "@fontsource/noto-serif": "^5.2.9",
     "@hookform/resolvers": "^5.2.2",
+    "@react-pdf/renderer": "^4.5.1",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.105.1",
     "framer-motion": "^12.38.0",
+    "jspdf": "^4.2.1",
     "lucide-react": "^0.469.0",
     "next": "^14.2.35",
     "next-intl": "^3.26.3",
@@ -27,6 +31,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.4",
+    "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
@@ -38,6 +43,7 @@
     "postcss": "^8.5.13",
     "tailwindcss": "^4.2.4",
     "typescript": "^6.0.3",
+    "vite": "^8.0.0",
     "vitest": "^4.1.5"
   }
 }

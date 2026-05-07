@@ -26,6 +26,10 @@ interface OllamaGenerateResponse {
   eval_duration?: number;
 }
 
+interface OllamaTagsResponse {
+  models?: Array<{ name: string }>;
+}
+
 export class OllamaClient {
   private baseUrl: string;
   private model: string;
@@ -93,7 +97,7 @@ export class OllamaClient {
           throw new Error(`Ollama API error: ${response.status} ${response.statusText}`);
         }
 
-        const data: OllamaGenerateResponse = await response.json();
+        const data = await response.json() as OllamaGenerateResponse;
 
         logger.info('Ollama generate success', {
           model: data.model,
@@ -148,8 +152,8 @@ export class OllamaClient {
         return false;
       }
 
-      const data = await response.json();
-      const availableModels = data.models?.map((m: any) => m.name) || [];
+      const data = await response.json() as OllamaTagsResponse;
+      const availableModels = (data.models || []).map((model) => model.name);
       const modelExists = availableModels.some((name: string) =>
         name === this.model || name === `${this.model}:latest`
       );

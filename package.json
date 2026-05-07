@@ -1,9 +1,14 @@
 {
+  "name": "webrag",
+  "private": true,
+  "packageManager": "yarn@3.6.4",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "dependencies": {
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.105.1",
-    "cline": "^2.17.0",
-    "dotenv": "^17.4.2",
-    "supabase": "^2.96.0"
+    "dotenv": "^17.4.2"
   }
 }

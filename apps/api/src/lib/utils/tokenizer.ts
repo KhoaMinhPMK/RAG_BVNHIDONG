@@ -65,7 +65,7 @@ export class Tokenizer {
    */
   decode(tokens: number[]): string {
     const encoder = this.getEncoder();
-    return encoder.decode(new Uint32Array(tokens));
+    return new TextDecoder().decode(encoder.decode(new Uint32Array(tokens)));
   }
 
   /**
@@ -81,7 +81,8 @@ export class Tokenizer {
     while (start < tokens.length) {
       const end = Math.min(start + maxTokens, tokens.length);
       const chunkTokens = Array.from(tokens.slice(start, end));
-      const chunkText = encoder.decode(new Uint32Array(chunkTokens));
+      const chunkBytes = encoder.decode(new Uint32Array(chunkTokens));
+      const chunkText = new TextDecoder().decode(chunkBytes);
       chunks.push(chunkText);
 
       // Move start forward, accounting for overlap

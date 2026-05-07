@@ -1,3 +1,6 @@
+# Local MCP config (contains tokens — do not commit)
+.cursor/mcp.json
+
 # Dependencies
 node_modules/
 .pnp
@@ -8,6 +11,12 @@ node_modules/
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+**/.yarn/*
+!**/.yarn/patches
+!**/.yarn/plugins
+!**/.yarn/releases
+!**/.yarn/sdks
+!**/.yarn/versions
 
 # Testing
 coverage/
@@ -60,6 +69,7 @@ Thumbs.db
 *.temp
 .cache/
 .parcel-cache/
+*.tsbuildinfo
 
 # Database
 *.db

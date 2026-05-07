@@ -16,6 +16,8 @@ import {
   ParsedDocument,
   DocumentChunk,
   ChunkingOptions,
+  DocumentMetadata,
+  IngestionProgressUpdate,
 } from './types.js';
 import { logger } from '../utils/logger.js';
 import crypto from 'crypto';
@@ -25,15 +27,21 @@ import crypto from 'crypto';
 // ============================================================================
 
 export class IngestionService {
-  private defaultOptions: Required<IngestionOptions>;
+  private defaultOptions: {
+    chunking: ChunkingOptions;
+    embedding_model: string;
+    batch_size: number;
+    skip_existing: boolean;
+    metadataOverride?: Partial<DocumentMetadata>;
+  };
 
   constructor(options?: IngestionOptions) {
     this.defaultOptions = {
-      chunking: options?.chunking || {
-        max_tokens: 512,
-        overlap_tokens: 50,
-        preserve_sentences: true,
-        preserve_paragraphs: true,
+      chunking: {
+        max_tokens: options?.chunking?.max_tokens ?? 512,
+        overlap_tokens: options?.chunking?.overlap_tokens ?? 50,
+        preserve_sentences: options?.chunking?.preserve_sentences ?? true,
+        preserve_paragraphs: options?.chunking?.preserve_paragraphs ?? true,
       },
       embedding_model: options?.embedding_model || 'nomic-embed-text',
       batch_size: options?.batch_size || 10,
@@ -49,23 +57,52 @@ export class IngestionService {
     options?: Partial<IngestionOptions>
   ): Promise<IngestionResult> {
     const startTime = Date.now();
-    const opts = { ...this.defaultOptions, ...options };
+    const opts = {
+      ...this.defaultOptions,
+      ...options,
+      chunking: {
+        ...this.defaultOptions.chunking,
+        ...options?.chunking,
+      },
+    };
 
     logger.info('Starting document ingestion', { filePath });
 
     try {
       // Step 1: Parse PDF
+      await this.reportProgress(opts.progressCallback, {
+        status: 'parsing',
+        progress: 5,
+        message: 'Đang đọc và trích xuất nội dung PDF',
+      });
       logger.info('Step 1/5: Parsing PDF...');
-      const parsed = await pdfParser.parsePDF(filePath);
+      let parsed = await pdfParser.parsePDF(filePath);
+
+      if (opts.metadataOverride) {
+        parsed = {
+          ...parsed,
+          metadata: {
+            ...parsed.metadata,
+            ...opts.metadataOverride,
+          },
+        };
+      }
+
       const contentHash = pdfParser.calculateContentHash(parsed.content);
 
       // Check if document already exists
-      if (opts.skip_existing) {
+      if (opts.skip_existing && !opts.existingDocumentId) {
         const existing = await this.checkExisting(contentHash);
         if (existing) {
           logger.info('Document already exists, skipping', {
             documentId: existing.id,
             contentHash,
+          });
+          await this.reportProgress(opts.progressCallback, {
+            status: 'completed',
+            progress: 100,
+            document_id: existing.id,
+            message: 'Tài liệu đã tồn tại, bỏ qua ingest mới',
           });
           return {
             success: true,
@@ -80,7 +117,13 @@ export class IngestionService {
 
       // Step 2: Insert document record
       logger.info('Step 2/5: Creating document record...');
-      const documentId = await this.insertDocumentRecord(parsed, contentHash);
+      const documentId = await this.upsertDocumentRecord(parsed, contentHash, opts);
+      await this.reportProgress(opts.progressCallback, {
+        status: 'chunking',
+        progress: 25,
+        document_id: documentId,
+        message: 'Đang chia tài liệu thành các chunk semantic',
+      });
 
       // Step 3: Chunk document
       logger.info('Step 3/5: Chunking document...');
@@ -92,15 +135,69 @@ export class IngestionService {
         logger.warn('Chunk validation warnings', { documentId, warnings });
       }
 
+      await this.reportProgress(opts.progressCallback, {
+        status: 'embedding',
+        progress: 45,
+        document_id: documentId,
+        total_chunks: chunks.length,
+        processed_chunks: 0,
+        message: `Đang tạo embedding cho ${chunks.length} chunk`,
+      });
+
       // Step 4: Generate embeddings
       logger.info('Step 4/5: Generating embeddings...');
-      const embedResults = await batchEmbeddingProcessor.embedChunks(chunks);
+      const embedResults = await batchEmbeddingProcessor.embedChunks(
+        chunks,
+        false,
+        async (processed, total) => {
+          const progress = 45 + Math.round((processed / Math.max(total, 1)) * 30);
+          await this.reportProgress(opts.progressCallback, {
+            status: 'embedding',
+            progress,
+            document_id: documentId,
+            total_chunks: total,
+            processed_chunks: processed,
+            message: `Đã tạo embedding ${processed}/${total} chunk`,
+          });
+        }
+      );
+
+      await this.reportProgress(opts.progressCallback, {
+        status: 'storing',
+        progress: 78,
+        document_id: documentId,
+        total_chunks: embedResults.length,
+        processed_chunks: 0,
+        message: 'Đang lưu chunks và embeddings vào database',
+      });
 
       // Step 5: Store chunks in Supabase
       logger.info('Step 5/5: Storing chunks in database...');
-      await this.storeChunks(embedResults);
+      await this.storeChunks(documentId, embedResults, {
+        replaceExisting: Boolean(opts.existingDocumentId),
+        onProgress: async (processed, total) => {
+          const progress = 78 + Math.round((processed / Math.max(total, 1)) * 21);
+          await this.reportProgress(opts.progressCallback, {
+            status: 'storing',
+            progress,
+            document_id: documentId,
+            total_chunks: total,
+            processed_chunks: processed,
+            message: `Đã lưu ${processed}/${total} chunk vào database`,
+          });
+        },
+      });
 
       const duration = Date.now() - startTime;
+
+      await this.reportProgress(opts.progressCallback, {
+        status: 'completed',
+        progress: 100,
+        document_id: documentId,
+        total_chunks: embedResults.length,
+        processed_chunks: embedResults.length,
+        message: 'Hoàn tất ingest tài liệu',
+      });
 
       logger.info('Document ingestion complete', {
         documentId,
@@ -123,6 +220,11 @@ export class IngestionService {
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       logger.error('Document ingestion failed', { filePath, error: errorMsg });
+      await this.reportProgress(opts.progressCallback, {
+        status: 'failed',
+        progress: 0,
+        message: errorMsg,
+      });
 
       return {
         success: false,
@@ -198,12 +300,75 @@ export class IngestionService {
   }
 
   /**
-   * Insert document record into Supabase
+   * Create or update document record in Supabase
    */
-  private async insertDocumentRecord(
+  private async upsertDocumentRecord(
     parsed: ParsedDocument,
-    contentHash: string
+    contentHash: string,
+    options: {
+      existingDocumentId?: string;
+      metadataPatch?: Record<string, any>;
+      sourceArtifact?: { path: string; original_name?: string; managed?: boolean };
+    }
   ): Promise<string> {
+    const metadataPatch = {
+      ...(options.metadataPatch ?? {}),
+      ...(options.sourceArtifact
+        ? {
+            source_artifact_path: options.sourceArtifact.path,
+            source_artifact_original_name: options.sourceArtifact.original_name,
+            source_artifact_managed: options.sourceArtifact.managed ?? false,
+          }
+        : {}),
+    };
+
+    if (options.existingDocumentId) {
+      const { data: existingDocument, error: existingError } = await supabase
+        .from('documents')
+        .select('metadata')
+        .eq('id', options.existingDocumentId)
+        .single();
+
+      if (existingError) {
+        logger.error('Failed to load existing document metadata', {
+          documentId: options.existingDocumentId,
+          error: existingError.message,
+        });
+        throw new Error(`Failed to load existing document metadata: ${existingError.message}`);
+      }
+
+      const { error } = await supabase
+        .from('documents')
+        .update({
+          title: parsed.metadata.title,
+          version: parsed.metadata.version,
+          effective_date: parsed.metadata.effective_date,
+          source: parsed.metadata.source,
+          owner: parsed.metadata.institution || 'System',
+          age_group: 'pediatric',
+          status: 'active',
+          language: 'vi',
+          access_level: 'clinician',
+          checksum: contentHash,
+          metadata: {
+            ...((existingDocument?.metadata as Record<string, any> | undefined) ?? {}),
+            ...metadataPatch,
+          },
+        })
+        .eq('id', options.existingDocumentId);
+
+      if (error) {
+        logger.error('Failed to update document record', { error });
+        throw new Error(`Failed to update document: ${error.message}`);
+      }
+
+      logger.info('Document record updated', {
+        documentId: options.existingDocumentId,
+        title: parsed.metadata.title,
+      });
+      return options.existingDocumentId;
+    }
+
     const documentId = uuidv4();
 
     const { error } = await supabase.from('documents').insert({
@@ -218,6 +383,7 @@ export class IngestionService {
       language: 'vi',
       access_level: 'clinician',
       checksum: contentHash,
+      metadata: metadataPatch,
     });
 
     if (error) {
@@ -233,11 +399,31 @@ export class IngestionService {
    * Store chunks with embeddings in Supabase
    */
   private async storeChunks(
-    embedResults: Array<{ chunk: DocumentChunk; embedding: number[] }>
+    documentId: string,
+    embedResults: Array<{ chunk: DocumentChunk; embedding: number[] }>,
+    options?: {
+      replaceExisting?: boolean;
+      onProgress?: (processed: number, total: number) => void | Promise<void>;
+    }
   ): Promise<void> {
+    if (options?.replaceExisting) {
+      const { error: deleteError } = await supabase
+        .from('chunks')
+        .delete()
+        .eq('document_id', documentId);
+
+      if (deleteError) {
+        logger.error('Failed to replace existing chunks', {
+          documentId,
+          error: deleteError.message,
+        });
+        throw new Error(`Failed to replace existing chunks: ${deleteError.message}`);
+      }
+    }
+
     const chunkRows = embedResults.map(({ chunk, embedding }) => ({
       id: uuidv4(),
-      document_id: chunk.metadata.document_id,
+      document_id: documentId,
       chunk_index: chunk.metadata.chunk_index,
       content: chunk.content,
       embedding,
@@ -250,6 +436,7 @@ export class IngestionService {
 
     // Insert in batches to avoid payload size limits
     const batchSize = 50;
+    let processed = 0;
     for (let i = 0; i < chunkRows.length; i += batchSize) {
       const batch = chunkRows.slice(i, i + batchSize);
 
@@ -263,9 +450,23 @@ export class IngestionService {
         });
         throw new Error(`Failed to insert chunks: ${error.message}`);
       }
+
+      processed += batch.length;
+      await options?.onProgress?.(processed, chunkRows.length);
     }
 
     logger.info('Chunks stored successfully', { totalChunks: chunkRows.length });
+  }
+
+  private async reportProgress(
+    progressCallback: IngestionOptions['progressCallback'],
+    update: IngestionProgressUpdate
+  ): Promise<void> {
+    if (!progressCallback) {
+      return;
+    }
+
+    await progressCallback(update);
   }
 
   /**

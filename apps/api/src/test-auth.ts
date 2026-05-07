@@ -15,6 +15,15 @@ const API_BASE = 'http://localhost:3001';
 const TEST_EMAIL = 'test@bvnhidong.vn';
 const TEST_PASSWORD = 'TestPass123!';
 
+interface TestApiResponse {
+  success?: boolean;
+  answer?: string;
+  citations?: unknown[];
+  error?: {
+    message?: string;
+  };
+}
+
 async function testAuth() {
   console.log('🧪 Testing Backend Authentication...\n');
 
@@ -72,7 +81,7 @@ VALUES (
     }),
   });
 
-  const queryData = await queryRes.json();
+  const queryData = await queryRes.json() as TestApiResponse;
   console.log(`   Status: ${queryRes.status}`);
   console.log(`   Success: ${queryData.success}`);
   if (queryData.success) {
@@ -94,7 +103,7 @@ VALUES (
     }),
   });
 
-  const unauthData = await unauthRes.json();
+  const unauthData = await unauthRes.json() as TestApiResponse;
   console.log(`   Status: ${unauthRes.status}`);
   console.log(`   Expected: 401 - Got: ${unauthRes.status} ${unauthData.success === false ? '✅' : '❌'}`);
 
@@ -111,7 +120,7 @@ VALUES (
     }),
   });
 
-  const invalidData = await invalidRes.json();
+  const invalidData = await invalidRes.json() as TestApiResponse;
   console.log(`   Status: ${invalidRes.status}`);
   console.log(`   Expected: 401 - Got: ${invalidRes.status} ${invalidData.success === false ? '✅' : '❌'}`);
 

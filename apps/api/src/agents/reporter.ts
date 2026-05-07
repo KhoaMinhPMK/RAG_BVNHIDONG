@@ -10,6 +10,14 @@ interface ReporterAgentRequest {
   clinical_data?: Record<string, any>;
 }
 
+interface GuidelineSnippet {
+  document_id?: string;
+  title: string;
+  version?: string;
+  content: string;
+  effective_date?: string;
+}
+
 /**
  * Reporter Agent - Generate draft report from template
  * Latency target: < 8s
@@ -25,11 +33,31 @@ QUY TẮC BẮT BUỘC:
 4. Nếu thiếu thông tin → để trống hoặc ghi "Cần bổ sung"
 5. Đánh dấu rõ phần nào do AI sinh, phần nào cần bác sĩ xác nhận
 6. Trích dẫn nguồn tài liệu tham khảo
+7. TUYỆT ĐỐI KHÔNG dùng emoji hoặc Unicode pictogram trong bất kỳ trường nào.
+8. TUYỆT ĐỐI KHÔNG bỏ dấu tiếng Việt. "không" phải viết "không", KHÔNG ĐƯỢC viết "khong". Mọi từ đều phải có đầy đủ dấu thanh và dấu mũ.
 
 Định dạng: JSON với các trường theo template`;
 
+  /** Built-in fallback template used when DB has no matching record */
+  private readonly fallbackTemplate = {
+    template_id: 'default',
+    name: 'Báo cáo phân tích X-quang ngực nhi',
+    schema: {
+      fields: [
+        { field_id: 'chief_complaint',     label: 'Lý do nhập viện',       type: 'text',     required: true  },
+        { field_id: 'vitals_summary',      label: 'Tóm tắt sinh hiệu',     type: 'text',     required: true  },
+        { field_id: 'lab_summary',         label: 'Tóm tắt xét nghiệm',    type: 'text',     required: true  },
+        { field_id: 'xray_findings',       label: 'Kết quả X-quang (AI)',   type: 'text',     required: false },
+        { field_id: 'clinical_assessment', label: 'Đánh giá lâm sàng',     type: 'textarea', required: true  },
+        { field_id: 'differential_dx',    label: 'Chẩn đoán vi phân',      type: 'textarea', required: true  },
+        { field_id: 'recommendations',    label: 'Đề xuất xử lý',          type: 'textarea', required: true  },
+        { field_id: 'physician_note',     label: 'Ghi chú bác sĩ',         type: 'textarea', required: false },
+      ],
+    },
+  };
+
   /**
-   * Get report template from database
+   * Get report template from database, fall back to built-in default if not found
    */
   private async getTemplate(templateId: string): Promise<any> {
     try {
@@ -40,15 +68,15 @@ QUY TẮC BẮT BUỘC:
         .eq('status', 'active')
         .single();
 
-      if (error) {
-        logger.error('Template retrieval error', { error: error.message, templateId });
-        throw new Error(`Template not found: ${templateId}`);
+      if (error || !data) {
+        logger.warn('Template not found in DB, using built-in fallback', { templateId });
+        return this.fallbackTemplate;
       }
 
       return data;
     } catch (err) {
-      logger.error('Template retrieval exception', { error: err });
-      throw err;
+      logger.warn('Template retrieval failed, using built-in fallback', { templateId });
+      return this.fallbackTemplate;
     }
   }
 
@@ -59,7 +87,7 @@ QUY TẮC BẮT BUỘC:
     template: any,
     detection: DetectionPayload,
     clinicalData: Record<string, any> | undefined,
-    guidelines: Array<{ title: string; content: string }>
+    guidelines: GuidelineSnippet[]
   ): Promise<{ fields: DraftField[]; citations: Citation[] }> {
     // Build detection summary
     const detectionSummary = detection.detections
@@ -117,7 +145,7 @@ Hãy điền thông tin vào các trường báo cáo. Trả lời theo định 
       const fields: DraftField[] = template.schema.fields.map((f: any) => ({
         field_id: f.field_id,
         label: f.label,
-        value: fieldValues[f.field_id] || '',
+        value: fieldValues[f.field_id] != null ? String(fieldValues[f.field_id]) : '',
         source: 'ai' as const,
         provenance: guidelines.map((g) => ({
           document_id: g.document_id || '',
@@ -175,16 +203,19 @@ Hãy điền thông tin vào các trường báo cáo. Trả lời theo định 
       );
 
       // Step 4: Save draft to database
+      // Use NULL for template_id when using the built-in fallback (non-UUID value)
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.template_id);
       const draftId = crypto.randomUUID();
       const { error: insertError } = await supabase
         .from('draft_reports')
         .insert({
           draft_id: draftId,
           episode_id: request.episode_id,
-          template_id: request.template_id,
+          template_id: isUUID ? request.template_id : null,
           fields: fields,
           status: 'draft',
           model_version: request.detection.model_version || process.env.OLLAMA_MODEL || 'qwen2.5:7b',
+          updated_at: new Date().toISOString(),
         });
 
       if (insertError) {

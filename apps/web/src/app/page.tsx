@@ -27,7 +27,7 @@ function transformEpisode(apiEp: ApiEpisode): Episode {
     id: apiEp.episode_id || apiEp.id,
     patientRef: apiEp.patient_ref || 'Chưa có thông tin',
     age: apiEp.age && apiEp.gender ? `${apiEp.age} · ${apiEp.gender}` : '—',
-    date: new Date(apiEp.admission_date).toLocaleDateString('vi-VN'),
+    date: apiEp.admission_date ? new Date(apiEp.admission_date).toLocaleDateString('vi-VN') : '—',
     findings: apiEp.findings || [],
     status: apiEp.status,
     updatedAt: new Date(apiEp.updated_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
@@ -35,11 +35,11 @@ function transformEpisode(apiEp: ApiEpisode): Episode {
 }
 
 const statusConfig: Record<CaseStatus, { label: string; color: string; dot: string; step: string; spinning?: boolean }> = {
-  pending_detection: { label: 'Đang phân tích ảnh...', color: 'text-text-secondary', dot: 'bg-text-tertiary animate-pulse', step: '1/3', spinning: true },
-  pending_explain:   { label: 'Chờ giải thích',    color: 'text-semantic-warning', dot: 'bg-semantic-warning animate-pulse', step: '2/3' },
-  pending_draft:     { label: 'Chờ sinh báo cáo',  color: 'text-brand-primary', dot: 'bg-brand-primary', step: '3/3' },
-  pending_approval:  { label: 'Chờ BS duyệt',      color: 'text-semantic-warning', dot: 'bg-semantic-warning animate-pulse', step: '3/3' },
-  completed:         { label: 'Hoàn thành',         color: 'text-semantic-success', dot: 'bg-semantic-success', step: '✓' },
+  pending_detection: { label: 'Đang phân tích ảnh...', color: 'text-text-secondary',    dot: 'bg-text-tertiary animate-breathe',        step: '1/3', spinning: true },
+  pending_explain:   { label: 'Chờ giải thích',         color: 'text-semantic-warning',  dot: 'bg-semantic-warning animate-breathe',     step: '2/3' },
+  pending_draft:     { label: 'Chờ sinh báo cáo',       color: 'text-brand-primary',     dot: 'bg-brand-primary animate-breathe',        step: '3/3' },
+  pending_approval:  { label: 'Chờ BS duyệt',           color: 'text-semantic-warning',  dot: 'bg-semantic-warning animate-breathe',     step: '3/3' },
+  completed:         { label: 'Hoàn thành',              color: 'text-semantic-success',  dot: 'bg-semantic-success',                     step: '✓' },
 };
 
 function WorklistContent() {
@@ -48,6 +48,7 @@ function WorklistContent() {
   const [countdown, setCountdown] = useState(30);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeFilter, setActiveFilter] = useState<'all' | 'processing' | 'completed'>('all');
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Fetch episodes from API
@@ -93,6 +94,12 @@ function WorklistContent() {
   }, []);
 
   const hasProcessing = episodes.some(e => e.status === 'pending_detection');
+
+  const filteredEpisodes = activeFilter === 'completed'
+    ? episodes.filter(e => e.status === 'completed')
+    : activeFilter === 'processing'
+    ? episodes.filter(e => e.status !== 'completed')
+    : episodes;
 
   return (
     <PageTransition>
@@ -161,14 +168,15 @@ function WorklistContent() {
       {/* Filter tabs */}
       <div className="flex items-center gap-1">
         {([
-          { label: 'Tất cả',      count: episodes.length },
-          { label: 'Đang xử lý', count: episodes.filter(e => e.status !== 'completed').length },
-          { label: 'Hoàn thành', count: episodes.filter(e => e.status === 'completed').length },
-        ] as const).map((f, i) => (
+          { label: 'Tất cả',      count: episodes.length,                                          key: 'all' as const },
+          { label: 'Đang xử lý', count: episodes.filter(e => e.status !== 'completed').length,    key: 'processing' as const },
+          { label: 'Hoàn thành', count: episodes.filter(e => e.status === 'completed').length,    key: 'completed' as const },
+        ]).map((f) => (
           <button
             key={f.label}
+            onClick={() => setActiveFilter(f.key)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-xs font-medium transition-all duration-150 hover:scale-105 ${
-              i === 0
+              activeFilter === f.key
                 ? 'bg-brand-light text-brand-primary'
                 : 'text-text-secondary hover:bg-background-secondary hover:text-text-primary'
             }`}
@@ -178,7 +186,7 @@ function WorklistContent() {
               initial={false}
               animate={{ scale: 1 }}
               whileHover={{ scale: 1.1 }}
-              className={`text-[10px] font-mono px-1 rounded-sm inline-block ${i === 0 ? 'bg-brand-primary text-white' : 'bg-background-tertiary border border-border text-text-tertiary'}`}
+              className={`text-[10px] font-mono px-1 rounded-sm inline-block ${activeFilter === f.key ? 'bg-brand-primary text-white' : 'bg-background-tertiary border border-border text-text-tertiary'}`}
             >
               {f.count}
             </motion.span>
@@ -204,14 +212,14 @@ function WorklistContent() {
               <EpisodeListSkeleton count={5} />
             </div>
           ) : (
-            episodes.map((ep, idx) => {
+            filteredEpisodes.map((ep, idx) => {
             const cfg = statusConfig[ep.status];
             return (
               <Link
                 key={ep.id}
                 href={`/cases/${ep.id}`}
-                className="grid grid-cols-[180px_120px_80px_1fr_140px_80px_40px] gap-3 px-4 py-3 items-center hover:bg-background-secondary transition-all duration-200 group animate-fade-in hover:shadow-sm hover:-translate-y-0.5"
-                style={{ animationDelay: `${idx * 50}ms` }}
+                className="grid grid-cols-[180px_120px_80px_1fr_140px_80px_40px] gap-3 px-4 py-3 items-center hover:bg-background-secondary transition-all duration-200 group animate-row-in hover:translate-x-0.5 border-l-2 border-transparent hover:border-brand-primary/40"
+                style={{ animationDelay: `${idx * 40}ms` }}
               >
                 {/* ID */}
                 <div>
@@ -272,7 +280,7 @@ function WorklistContent() {
       )}
 
       {/* Empty state */}
-      {!error && !isLoading && episodes.length === 0 && (
+      {!error && !isLoading && filteredEpisodes.length === 0 && (
         <div className="border border-border rounded-sm bg-surface p-12 text-center">
           <Circle className="w-8 h-8 text-text-tertiary mx-auto mb-3" />
           <p className="text-sm font-medium text-text-secondary">Chưa có ca nào</p>

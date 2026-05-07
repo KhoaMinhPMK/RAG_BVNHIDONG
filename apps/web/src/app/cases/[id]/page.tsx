@@ -1,31 +1,44 @@
 'use client';
 
-import { Suspense, useState, useEffect, useRef } from 'react';
+import { Suspense, useState, useEffect, useRef, useMemo } from 'react';
+import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, Activity, BookOpen, ClipboardList,
   ChevronRight, AlertTriangle, Play, Check, X,
-  User, Calendar, Stethoscope, Send,
-  ThumbsUp, ThumbsDown, Loader2, RefreshCw, FlaskConical,
-  Maximize2,
+  User, Calendar, Stethoscope,
+  Loader2, RefreshCw, FlaskConical,
+  Maximize2, Minimize2, Brain, Eye, Printer, Database, Save, Download,
 } from 'lucide-react';
 import { PageTransition } from '@/components/ui/page-transition';
-import { DetectionSkeleton, ExplanationSkeleton, DraftSkeleton } from '@/components/ui/loading-skeleton';
+import { DetectionSkeleton } from '@/components/ui/loading-skeleton';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
-import { getEpisodeDetail, explainDetection, queryKnowledge, generateDraft } from '@/lib/api/client';
-import { motion } from 'framer-motion';
+import { getEpisodeDetail, getLatestAiRun, getLatestDraft, invalidateDraftCache } from '@/lib/api/client';
+import type { AiRunRow } from '@/lib/api/client';
 import { CAEDock } from '@/components/cae/CAEDock';
+import { BlockRenderer } from '@/components/cae/BlockRenderer';
+import { useCAEStream } from '@/hooks/useCAEStream';
+import type { CitationAnchor, RenderableBlock, UIAction } from '@/types/cae-output';
+import { downloadReportPDF } from '@/components/pdf/ReportPDF';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 type Step = 'detection' | 'explain' | 'draft';
 type PanelMode = 'wide' | 'balanced' | 'compact';
-interface ChatMsg { role: 'user' | 'assistant'; content: string; }
+interface DraftProvenance {
+  document_id: string;
+  document_title: string;
+  version?: string;
+  effective_date?: string;
+  excerpt: string;
+}
 interface DraftField {
   key: string; label: string; value: string;
-  modified: boolean; type: 'ai' | 'required' | 'readonly'; rows: number;
+  modified: boolean; rows: number;
+  source: 'ai' | 'manual' | 'locked';
+  status: 'valid' | 'needs_review' | 'policy_blocked';
+  provenance: DraftProvenance[];
 }
-interface PendingChange { fieldKey: string; newValue: string; label: string; }
 interface Citation { num: number; ref: string; section: string; passage: string; confidence: number; }
 interface CaseInfo { patientRef: string; age: string; gender: string; date: string; symptoms: string; spo2: string; crp: string; }
 
@@ -125,30 +138,6 @@ const EPISODE_TO_SAMPLE: Record<string, number> = {
   'EP-2024-001': 9, // imgid_96  — Peribronchovascular + Reticulonodular
 };
 
-// ─── Citations & draft data ────────────────────────────────────────────────
-const CITATIONS_DATA = [
-  { num: 1, ref: 'WHO — Pocket Book of Hospital Care for Children, 2023', section: '§3.2 — Diagnosis of pneumonia',
-    passage: 'In a child with cough or difficulty breathing, classify as pneumonia if there is fast breathing (≥50 breaths/min in 2–12 months, ≥40 in 1–5 years) or chest indrawing.', confidence: 0.91 },
-  { num: 2, ref: 'BYT Việt Nam — Hướng dẫn chẩn đoán viêm phổi trẻ em, 2020', section: '§5.1 — Phân loại mức độ nặng',
-    passage: 'Viêm phổi nặng: SpO₂ < 95%, nhịp thở nhanh, co rút lõm ngực, hoặc không uống được. Trẻ có dấu hiệu này cần nhập viện và điều trị kháng sinh theo phác đồ.', confidence: 0.87 },
-  { num: 3, ref: 'BTS — Paediatric Pneumonia Guidelines, 2022', section: 'p.18 — Parapneumonic effusion',
-    passage: 'Parapneumonic effusions occur in ~20–40% of children hospitalised with bacterial pneumonia. Small-moderate effusions usually resolve with antibiotics.', confidence: 0.83 },
-];
-
-const EXPLANATION_TEXT = `Hình ảnh X-quang ngực cho thấy đông đặc vùng thùy dưới phổi phải, bờ không rõ — phù hợp với tổn thương viêm phổi thùy. Kèm theo hình ảnh mờ góc sườn hoành phải, gợi ý tràn dịch màng phổi mức độ nhẹ đến vừa. [1]
-
-Kết hợp lâm sàng: trẻ 3 tuổi, sốt 3 ngày, thở nhanh, SpO₂ 94%, CRP 45.2 mg/L — phù hợp viêm phổi vi khuẩn. SpO₂ < 95% là tiêu chuẩn mức nặng theo WHO 2023, cần nhập viện và điều trị theo phác đồ. [2]
-
-Tràn dịch màng phổi kèm theo gặp ở 20–40% viêm phổi vi khuẩn. Cần theo dõi diễn tiến và đánh giá chỉ định can thiệp nếu lượng tăng hoặc không cải thiện sau 48 giờ kháng sinh. [3]`;
-
-const INITIAL_DRAFT: DraftField[] = [
-  { key: 'xray', label: 'Nhận xét X-quang', type: 'ai', rows: 3, modified: false, value: 'Đông đặc thùy dưới phổi phải, bờ không rõ. Tràn dịch màng phổi phải mức độ nhẹ-vừa.' },
-  { key: 'suggestion', label: 'Gợi ý chẩn đoán hỗ trợ', type: 'ai', rows: 3, modified: false, value: 'Hình ảnh phù hợp viêm phổi thùy do vi khuẩn ở trẻ 3 tuổi. Cần kết hợp lâm sàng để kết luận. Không thay thế chẩn đoán của bác sỹ điều trị.' },
-  { key: 'severity', label: 'Mức độ nặng ước tính', type: 'readonly', rows: 1, modified: false, value: 'Nặng (WHO 2023) — SpO₂ 94% < 95%, thở nhanh' },
-  { key: 'recommendation', label: 'Khuyến nghị theo dõi', type: 'ai', rows: 2, modified: false, value: 'Theo dõi SpO₂ và nhịp thở. Đánh giá lại sau 24 giờ điều trị.' },
-  { key: 'note', label: 'Ghi chú đọc phim', type: 'required', rows: 3, modified: false, value: '' },
-];
-
 // ─── Panel width presets ────────────────────────────────────────────────────
 const PANEL_WIDTHS: Record<PanelMode, number> = { wide: 54, balanced: 44, compact: 30 };
 const STEP_DEFAULT_MODE: Record<Step, PanelMode> = { detection: 'wide', explain: 'balanced', draft: 'compact' };
@@ -161,25 +150,151 @@ function streamText(text: string, onUpdate: (s: string) => void, onDone: () => v
   }
   setTimeout(tick, 180);
 }
-function getKnowledgeReply(q: string): string {
-  const l = q.toLowerCase();
-  if (l.match(/nhập viện|nặng/)) return 'Theo WHO 2023, tiêu chuẩn nhập viện: SpO₂ < 95%, nhịp thở nhanh, rút lõm lồng ngực, hoặc không uống được.\nCa này SpO₂ 94% → đáp ứng tiêu chuẩn.\n\n📚 WHO Pocket Book 2023, §4.1';
-  if (l.match(/điều trị|kháng sinh/)) return 'Hệ thống không đưa ra khuyến nghị điều trị hoặc kê đơn.\n\n⚠ Tham khảo phác đồ khoa và quyết định của bác sỹ điều trị.';
-  if (l.match(/tràn dịch|effusion/)) return 'Tràn dịch trong viêm phổi vi khuẩn gặp ở 20–40%. Theo BTS 2022, tràn dịch nhẹ-vừa thường tự hấp thu. Can thiệp khi lượng nhiều, không cải thiện sau 48h, hoặc nghi empyema.\n\n📚 BTS 2022, p.18';
-  return 'Chưa tìm thấy đoạn tài liệu đủ tin cậy cho câu hỏi này.\n\n⚠ Knowledge Agent chưa implement — mock response.';
+function buildDetectionPayload(sample: PcxrSample) {
+  return {
+    image_id: sample.imageId,
+    detections: sample.annotations.map(annotation => ({
+      bbox: annotation.bbox,
+      label: annotation.category,
+      score: mockScore(annotation.id),
+    })),
+  };
 }
-function getDraftAdjustment(cmd: string, fields: DraftField[]): PendingChange | null {
-  const l = cmd.toLowerCase();
-  if (l.match(/spo2|4 giờ|theo dõi/)) {
-    const f = fields.find(x => x.key === 'recommendation');
-    if (f) return { fieldKey: 'recommendation', label: f.label, newValue: f.value.trimEnd() + ' Theo dõi SpO₂ mỗi 4 giờ và nhịp thở mỗi 2 giờ trong 24 giờ đầu.' };
+
+function getFieldRows(value: string) {
+  if (!value) return 3;
+  if (value.length > 180) return 5;
+  if (value.length > 80) return 3;
+  return 2;
+}
+
+function normalizeFieldKey(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
+}
+
+function matchesFieldKey(field: Pick<DraftField, 'key' | 'label'>, candidate: string | null) {
+  if (!candidate) {
+    return false;
   }
-  if (l.match(/ngắn|viết lại/)) return { fieldKey: 'suggestion', label: 'Gợi ý chẩn đoán hỗ trợ', newValue: 'Hình ảnh phù hợp viêm phổi vi khuẩn thùy phổi phải. Cần BS xác nhận.' };
-  if (l.match(/phổi trái/)) {
-    const f = fields.find(x => x.key === 'xray');
-    if (f) return { fieldKey: 'xray', label: f.label, newValue: f.value.trimEnd() + ' Phổi trái không có tổn thương rõ.' };
+
+  const normalizedCandidate = normalizeFieldKey(candidate);
+  return normalizeFieldKey(field.key) === normalizedCandidate || normalizeFieldKey(field.label) === normalizedCandidate;
+}
+
+function mapApiCitation(citation: any, index: number): Citation {
+  return {
+    num: index + 1,
+    ref: `${citation.document_title ?? 'Nguồn tham khảo'}${citation.version ? ` · ${citation.version}` : ''}`,
+    section: citation.effective_date ?? '',
+    passage: citation.excerpt ?? '',
+    confidence: 0.8,
+  };
+}
+
+function mapStructuredCitation(citation: CitationAnchor, index: number): Citation {
+  const sectionParts = [citation.effectiveDate, citation.trustLevel === 'internal' ? 'Nội bộ' : 'Tham khảo'].filter(Boolean);
+  const parsedNum = Number.parseInt(citation.citationId, 10);
+  return {
+    num: Number.isFinite(parsedNum) ? parsedNum : index + 1,
+    ref: `${citation.documentTitle}${citation.version ? ` · ${citation.version}` : ''}`,
+    section: sectionParts.join(' · '),
+    passage: citation.excerpt || 'Chưa có đoạn trích phù hợp từ knowledge base.',
+    confidence: citation.similarity,
+  };
+}
+
+function mapDraftFields(fields: Array<{
+  field_id: string;
+  label: string;
+  value: string;
+  source: 'ai' | 'manual' | 'locked';
+  provenance: DraftProvenance[];
+  status: 'valid' | 'needs_review' | 'policy_blocked';
+}>): DraftField[] {
+  return fields.map(field => ({
+    key: field.field_id,
+    label: field.label,
+    value: field.value ?? '',
+    modified: false,
+    rows: getFieldRows(field.value ?? ''),
+    source: field.source,
+    status: field.status,
+    provenance: field.provenance ?? [],
+  }));
+}
+
+/** Safely coerce an AI field value to a plain string regardless of LLM output shape */
+function toFieldString(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (v == null) return '';
+  if (typeof v === 'object') {
+    const obj = v as Record<string, unknown>;
+    if (typeof obj.text    === 'string') return obj.text;
+    if (typeof obj.value   === 'string') return obj.value;
+    if (typeof obj.content === 'string') return obj.content;
+    return JSON.stringify(v);
   }
-  return null;
+  return String(v);
+}
+
+function mapPatchBlocksToDraftFields(blocks: RenderableBlock[]): DraftField[] {
+  return blocks
+    .filter((block): block is Extract<RenderableBlock, { type: 'field_patch' }> => block.type === 'field_patch')
+    .map((block) => ({
+      key: block.fieldKey,
+      label: block.label ?? block.fieldKey,
+      value: toFieldString(block.diff.after),
+      modified: false,
+      rows: getFieldRows(toFieldString(block.diff.after)),
+      source: block.source ?? 'ai',
+      status: block.status ?? 'needs_review',
+      provenance: (block.provenance ?? []).map((citation) => ({
+        document_id: citation.document_id,
+        document_title: citation.document_title,
+        version: citation.version,
+        effective_date: citation.effective_date,
+        excerpt: citation.excerpt,
+      })),
+    }));
+}
+
+function extractNarrativeHighlights(text: string, limit = 3) {
+  const normalized = text
+    .replace(/^#{1,6}\s*/gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\[\d+\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) {
+    return [];
+  }
+
+  const sentences = normalized
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+
+  if (sentences.length === 0) {
+    return [normalized.slice(0, 180)];
+  }
+
+  return sentences.slice(0, limit);
+}
+
+function resolveFindingIndex(sample: PcxrSample, findingId: string): number | null {
+  const directMatch = sample.annotations.findIndex(annotation => String(annotation.id) === findingId);
+  if (directMatch >= 0) {
+    return directMatch;
+  }
+
+  const normalizedFindingId = findingId.toLowerCase();
+  const labelMatch = sample.annotations.findIndex(annotation => {
+    const longLabel = annotation.category.toLowerCase();
+    const shortLabel = catShort(annotation.categoryId, annotation.category).toLowerCase();
+    return longLabel.includes(normalizedFindingId) || shortLabel.includes(normalizedFindingId);
+  });
+
+  return labelMatch >= 0 ? labelMatch : null;
 }
 
 // ─── TextWithCitations ─────────────────────────────────────────────────────
@@ -192,7 +307,7 @@ function TextWithCitations({ text, onCitationClick }: { text: string; onCitation
           const n = parseInt(m[1]);
           return (
             <button key={i} onClick={() => onCitationClick(n)} title={`Xem nguồn [${n}]`}
-              className="inline-flex items-center justify-center w-[17px] h-[14px] text-[9px] font-bold text-brand-primary bg-brand-light border border-brand-primary/40 rounded-sm mx-0.5 hover:bg-brand-primary hover:text-white transition-colors align-middle">
+              className="inline-flex items-center justify-center w-4.25 h-3.5 text-[9px] font-bold text-brand-primary bg-brand-light border border-brand-primary/40 rounded-sm mx-0.5 hover:bg-brand-primary hover:text-white transition-colors align-middle">
               {n}
             </button>
           );
@@ -271,7 +386,14 @@ function XrayViewport({
   const [transform, setTransform] = useState({ scale: 1, x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [showScan, setShowScan] = useState(true);
   const dim = sample.dim;
+
+  // One-time scan animation on mount
+  useEffect(() => {
+    const t = setTimeout(() => setShowScan(false), 1800);
+    return () => clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -367,6 +489,21 @@ function XrayViewport({
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
           >
+          {/* Scan line — one-time sweep on mount */}
+          {showScan && squarePx > 0 && (
+            <motion.div
+              initial={{ y: 0 }}
+              animate={{ y: squarePx }}
+              transition={{ duration: 1.5, ease: 'linear' }}
+              onAnimationComplete={() => setShowScan(false)}
+              className="absolute top-0 left-0 right-0 h-px pointer-events-none z-30"
+              style={{
+                backgroundColor: 'rgba(20, 184, 166, 0.75)',
+                boxShadow: '0 0 10px 3px rgba(20, 184, 166, 0.35)',
+              }}
+            />
+          )}
+
           {/* Real X-ray image */}
           <img
             src={sample.imgSrc}
@@ -398,8 +535,9 @@ function XrayViewport({
                   width: `${w}%`,
                   height: `${h}%`,
                   zIndex: isFocused ? 20 : 1,
+                  animationDelay: `${0.9 + i * 0.18}s`,
                 }}
-                className={`border-2 cursor-pointer transition-all duration-150 ${col.border} ${isHot || isFocused ? col.bgHover : 'bg-transparent'}`}
+                className={`border-2 cursor-pointer transition-all duration-150 animate-bbox-reveal ${col.border} ${isHot || isFocused ? col.bgHover : 'bg-transparent'}`}
               >
                 {[[-4, -4], [-4, undefined], [undefined, -4], [undefined, undefined]].map(([top, left], ci) => (
                   <div key={ci} style={{
@@ -432,12 +570,13 @@ function XrayViewport({
 // ─── Image panel ───────────────────────────────────────────────────────────
 function ImagePanel({
   widthPct, sample, caseInfo,
-  hoveredIdx, onHoverIdx, focusedIdx, onFocusIdx, onFullscreen,
+  hoveredIdx, onHoverIdx, focusedIdx, onFocusIdx, onFullscreen, onCollapse,
 }: {
   widthPct: number; sample: PcxrSample; caseInfo: CaseInfo;
   hoveredIdx: number | null; onHoverIdx: (i: number | null) => void;
   focusedIdx: number | null; onFocusIdx: (i: number | null) => void;
   onFullscreen: () => void;
+  onCollapse?: () => void;
 }) {
   const [infoOpen, setInfoOpen] = useState(true);
 
@@ -462,6 +601,15 @@ function ImagePanel({
             <button onClick={onFullscreen} title="Phóng to" className="p-0.5 text-zinc-500 hover:text-zinc-300 transition-colors">
               <Maximize2 className="w-3 h-3" />
             </button>
+            {onCollapse && (
+              <button
+                onClick={onCollapse}
+                title="Ẩn ảnh"
+                className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:text-zinc-200 border border-zinc-700 rounded-sm transition-colors"
+              >
+                <Minimize2 className="w-3 h-3" />Ẩn
+              </button>
+            )}
           </div>
         </div>
 
@@ -663,236 +811,682 @@ function DetectionPanel({ sample, hoveredIdx, onHoverIdx, focusedIdx, onFocusIdx
 
 // ─── Step 2: Explain ───────────────────────────────────────────────────────
 function ExplainPanel({
-  episodeId, sample, onNext, onCitation, onCitationsLoaded,
+  episodeId, sample, onNext, onCitation, onCitationsLoaded, onStructuredCitationsLoaded, focusedIdx, onFocusIdx,
 }: {
   episodeId: string;
   sample: PcxrSample;
   onNext: () => void;
   onCitation: (n: number) => void;
   onCitationsLoaded: (cits: Citation[]) => void;
+  onStructuredCitationsLoaded?: (cits: CitationAnchor[]) => void;
+  focusedIdx: number | null;
+  onFocusIdx: (i: number | null) => void;
 }) {
-  const [status, setStatus] = useState<'idle' | 'streaming' | 'done'>('idle');
-  const [text, setText] = useState('');
   const [feedback, setFeedback] = useState<'accepted' | 'rejected' | null>(null);
-  const [msgs, setMsgs] = useState<ChatMsg[]>([]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [liveCitations, setLiveCitations] = useState<Citation[]>([]);
-  const [llmProvider, setLlmProvider] = useState<'ollama' | 'mimo'>('mimo');
-  const endRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs]);
+  const [hasStarted, setHasStarted] = useState(false);
+  const [showFindings, setShowFindings] = useState(false);
+  // DB restore state
+  const [restoredBlocks, setRestoredBlocks] = useState<RenderableBlock[]>([]);
+  const [restoredCitations, setRestoredCitations] = useState<CitationAnchor[]>([]);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [restoredAt, setRestoredAt] = useState<string | null>(null);
+
+  const findingIds = sample.annotations.map((annotation) => String(annotation.id));
+  const {
+    isStreaming,
+    blocks: streamBlocks,
+    citations: streamCitations,
+    content,
+    error,
+    startExplain,
+    abort,
+    reset,
+  } = useCAEStream();
+
+  // Use streamed results if available, else fall back to DB-restored results
+  const blocks = streamBlocks.length > 0 ? streamBlocks : restoredBlocks;
+  const citations = streamCitations.length > 0 ? streamCitations : restoredCitations;
+
+  const liveCitations = useMemo(
+    () => citations.map((citation, index) => mapStructuredCitation(citation, index)),
+    [citations]
+  );
+  const narrativeSummary = blocks.find((block) => block.type === 'summary');
+  const narrativeBody = useMemo(
+    () => blocks
+      .filter((block): block is Extract<RenderableBlock, { type: 'paragraph' }> => block.type === 'paragraph')
+      .map((block) => block.text)
+      .join(' '),
+    [blocks]
+  );
+  const narrativeHighlights = useMemo(
+    () => extractNarrativeHighlights(narrativeBody || (narrativeSummary?.type === 'summary' ? narrativeSummary.text : '')),
+    [narrativeBody, narrativeSummary]
+  );
+  const activeFinding = focusedIdx !== null ? sample.annotations[focusedIdx] ?? null : null;
+  const status = isRestoring ? 'restoring' : !hasStarted ? 'idle' : isStreaming ? 'streaming' : error ? 'error' : 'done';
+
+  // DB restore: on mount check for recent explain run (max 8h)
+  useEffect(() => {
+    let cancelled = false;
+    async function tryRestore() {
+      setIsRestoring(true);
+      try {
+        const run = await getLatestAiRun(episodeId, 'explain', 480);
+        if (!cancelled && run && (run.blocks as RenderableBlock[]).length > 0) {
+          setRestoredBlocks(run.blocks as RenderableBlock[]);
+          setRestoredCitations((run.citations ?? []) as CitationAnchor[]);
+          setRestoredAt(run.completed_at ?? run.created_at);
+          setHasStarted(true);
+        }
+      } finally {
+        if (!cancelled) setIsRestoring(false);
+      }
+    }
+    tryRestore();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [episodeId]);
+
+  useEffect(() => {
+    onCitationsLoaded(liveCitations);
+  }, [liveCitations, onCitationsLoaded]);
+
+  useEffect(() => {
+    onStructuredCitationsLoaded?.(citations);
+  }, [citations, onStructuredCitationsLoaded]);
+
+  // NOTE: no abort/reset on unmount — component stays mounted (CSS hidden) for tab-switch persistence
 
   const handleRun = async () => {
-    setStatus('streaming'); setText('');
-    try {
-      const res = await explainDetection(episodeId, {
-        image_id: sample.imageId,
-        detections: sample.annotations.map(a => ({ bbox: a.bbox, label: a.category, score: mockScore(a.id) })),
-      });
-      if (res.success) {
-        const mapped: Citation[] = (res.citations ?? []).map((c: any, i: number) => ({
-          num: i + 1,
-          ref: `${c.document_title ?? ''} ${c.version ?? ''}`.trim(),
-          section: c.effective_date ?? '',
-          passage: c.excerpt ?? '',
-          confidence: 0.8,
-        }));
-        setLiveCitations(mapped);
-        onCitationsLoaded(mapped);
-        streamText(res.explanation ?? EXPLANATION_TEXT, setText, () => setStatus('done'));
-      } else {
-        streamText(EXPLANATION_TEXT, setText, () => setStatus('done'));
-      }
-    } catch {
-      streamText(EXPLANATION_TEXT, setText, () => setStatus('done'));
-    }
+    // Clear restored state so stream results take over
+    setRestoredBlocks([]);
+    setRestoredCitations([]);
+    setRestoredAt(null);
+    setHasStarted(true);
+    setFeedback(null);
+    onCitationsLoaded([]);
+    onStructuredCitationsLoaded?.([]);
+    reset();
+    await startExplain(episodeId, buildDetectionPayload(sample), { findingIds });
   };
 
-  const handleSend = async () => {
-    const q = input.trim(); if (!q) return;
-    setInput(''); setMsgs(m => [...m, { role: 'user', content: q }]); setLoading(true);
-    try {
-      const res = await queryKnowledge(q, episodeId, llmProvider);
-      const answer = res.success && res.answer ? res.answer : getKnowledgeReply(q);
-      setMsgs(m => [...m, { role: 'assistant', content: answer }]);
-    } catch {
-      setMsgs(m => [...m, { role: 'assistant', content: getKnowledgeReply(q) }]);
-    } finally {
-      setLoading(false);
+  const handleCitationSelect = (citationId: string) => {
+    const parsedId = Number.parseInt(citationId, 10);
+    if (Number.isFinite(parsedId)) {
+      onCitation(parsedId);
     }
   };
-
-  const displayCitations = liveCitations.length > 0 ? liveCitations : CITATIONS_DATA;
 
   return (
-    <div className="flex flex-col gap-3 flex-1 min-h-0">
-      <div className="border border-border rounded-sm bg-surface flex flex-col flex-1 min-h-0">
-        <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
-          <span className="text-xs font-semibold text-text-primary">CAE giải thích lâm sàng</span>
-          <div className="flex items-center gap-2">
-            {/* Provider toggle */}
-            <div className="flex items-center border border-border rounded-sm overflow-hidden">
-              <button onClick={() => setLlmProvider('ollama')}
-                className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${llmProvider === 'ollama' ? 'bg-brand-primary text-white' : 'bg-surface text-text-tertiary hover:bg-background-secondary'}`}>
-                Ollama
-              </button>
-              <button onClick={() => setLlmProvider('mimo')}
-                className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${llmProvider === 'mimo' ? 'bg-brand-primary text-white' : 'bg-surface text-text-tertiary hover:bg-background-secondary'}`}>
-                MiMo
-              </button>
-            </div>
-            {status === 'streaming' && <div className="flex items-center gap-1.5 text-[10px] text-text-tertiary"><Loader2 className="w-3 h-3 animate-spin" />Đang tạo...</div>}
-            {status === 'done' && <span className="text-[10px] text-text-tertiary font-mono">{llmProvider === 'mimo' ? 'mimo-v2.5-pro' : 'qwen2.5:7b'} · nhấn <span className="text-brand-primary font-bold">[N]</span> xem nguồn</span>}
-          </div>
-        </div>
-        {status === 'idle' ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-6 gap-3">
-            <Play className="w-8 h-8 text-text-tertiary" />
-            <button onClick={handleRun} className="flex items-center gap-2 px-4 py-2 bg-brand-primary text-white text-xs font-semibold rounded-sm hover:opacity-90">
-              <Play className="w-3.5 h-3.5" />Chạy CAE giải thích
-            </button>
-          </div>
-        ) : status === 'streaming' ? (
-          <div className="flex-1 overflow-y-auto p-4 min-h-0">
-            <p className="text-sm text-text-primary leading-relaxed">
-              {text}<span className="inline-block w-0.5 h-4 bg-brand-primary ml-0.5 animate-pulse" />
-            </p>
-          </div>
-        ) : (
-          <div className="flex-1 overflow-y-auto p-4 min-h-0">
-            <p className="text-sm text-text-primary leading-relaxed">
-              <TextWithCitations text={text} onCitationClick={onCitation} />
-            </p>
-            {status === 'done' && (
-              <div className="mt-4 pt-3 border-t border-border">
-                <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wider mb-2">Nguồn — nhấn để đọc</p>
-                <div className="space-y-1.5">
-                  {displayCitations.map(c => (
-                    <button key={c.num} onClick={() => onCitation(c.num)}
-                      className="w-full flex items-start gap-2 p-2 rounded-sm bg-background-secondary border border-border hover:border-brand-primary/50 hover:bg-brand-light/10 transition-colors text-left">
-                      <span className="text-[10px] font-bold text-brand-primary w-5 shrink-0">[{c.num}]</span>
-                      <div><p className="text-[11px] font-medium text-text-primary truncate">{c.ref}</p><p className="text-[10px] text-text-tertiary">{c.section}</p></div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-        {status === 'done' && (
-          <div className="shrink-0 border-t border-border px-3 py-2 flex items-center gap-2">
-            <span className="text-[10px] text-text-tertiary mr-1">Phản hồi:</span>
-            {(['accepted', 'rejected'] as const).map(fb => (
-              <button key={fb} onClick={() => setFeedback(fb)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-[11px] font-medium border transition-colors ${
-                  feedback === fb
-                    ? fb === 'accepted' ? 'bg-semantic-success/10 text-semantic-success border-semantic-success/30' : 'bg-semantic-error/10 text-semantic-error border-semantic-error/30'
-                    : 'border-border text-text-secondary hover:bg-background-secondary'
-                }`}>
-                {fb === 'accepted' ? <ThumbsUp className="w-3 h-3" /> : <ThumbsDown className="w-3 h-3" />}
-                {fb === 'accepted' ? (feedback === 'accepted' ? 'Đã chấp nhận' : 'Chấp nhận') : (feedback === 'rejected' ? 'Không phù hợp' : 'Không phù hợp')}
-              </button>
-            ))}
-            {feedback && <button onClick={() => { setFeedback(null); handleRun(); }} className="flex items-center gap-1 text-[10px] text-text-tertiary ml-auto hover:text-text-primary"><RefreshCw className="w-3 h-3" />Chạy lại</button>}
-          </div>
-        )}
-      </div>
+    <div className="flex flex-col gap-2 flex-1 min-h-0">
 
-      {status === 'done' && (
-        <div className="border border-border rounded-sm bg-surface flex flex-col shrink-0" style={{ maxHeight: 220 }}>
-          <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border shrink-0">
-            <BookOpen className="w-3.5 h-3.5 text-text-tertiary" />
-            <span className="text-xs font-semibold text-text-primary">Hỏi thêm CAE</span>
-            <span className="text-[10px] text-text-tertiary ml-1">RAG theo ca</span>
-          </div>
-          <div className="flex-1 overflow-y-auto p-2.5 space-y-2 min-h-0">
-            {msgs.length === 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {['Tiêu chuẩn nhập viện?', 'Tràn dịch cần can thiệp khi nào?'].map(s => (
-                  <button key={s} onClick={() => setInput(s)} className="text-[10px] px-2 py-1 border border-border rounded-sm text-text-secondary hover:bg-background-secondary hover:border-brand-primary transition-colors">{s}</button>
-                ))}
-              </div>
-            )}
-            {msgs.map((m, i) => (
-              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] px-2.5 py-2 rounded-sm text-xs leading-relaxed whitespace-pre-wrap ${m.role === 'user' ? 'bg-brand-primary text-white' : 'bg-background-secondary border border-border text-text-primary'}`}>{m.content}</div>
-              </div>
-            ))}
-            {loading && <div className="flex justify-start"><div className="px-2.5 py-2 rounded-sm bg-background-secondary border border-border flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin text-text-tertiary" /><span className="text-[11px] text-text-tertiary">Đang tra cứu...</span></div></div>}
-            <div ref={endRef} />
-          </div>
-          <div className="shrink-0 border-t border-border p-2 flex gap-2">
-            <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
-              placeholder="Hỏi thêm..." className="flex-1 text-xs border border-border rounded-sm px-2.5 py-1.5 bg-background focus:outline-none focus:border-brand-primary text-text-primary placeholder:text-text-tertiary" />
-            <button onClick={handleSend} disabled={!input.trim() || loading} className="w-8 h-8 flex items-center justify-center rounded-sm bg-brand-primary text-white disabled:opacity-40"><Send className="w-3.5 h-3.5" /></button>
+      {/* ── Restoring from DB ────────────────────────────────────────────── */}
+      {status === 'restoring' && (
+        <div className="flex-1 flex items-center justify-center border border-border rounded-sm bg-surface">
+          <div className="flex items-center gap-2 text-xs text-text-tertiary">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            Đang khôi phục kết quả...
           </div>
         </div>
       )}
 
+      {/* ── Idle ─────────────────────────────────────────────────────────── */}
+      {status === 'idle' && (
+        <div className="flex-1 flex flex-col items-center justify-center border border-border rounded-sm bg-surface p-8 gap-5">
+          <div className="text-center space-y-1 max-w-sm">
+            <p className="text-sm font-semibold text-text-primary">
+              Giải thích lâm sàng
+            </p>
+            <p className="text-xs text-text-secondary leading-relaxed">
+              CAE sẽ ghép narrative cho {sample.annotations.length} finding, đối chiếu guideline và gắn citation vào từng điểm bất thường.
+            </p>
+          </div>
+          <button
+            onClick={handleRun}
+            className="flex items-center gap-2 px-5 py-2.5 bg-brand-primary text-white text-xs font-semibold rounded-sm hover:opacity-90 transition-opacity"
+          >
+            <Play className="w-3.5 h-3.5" />
+            Tạo narrative
+          </button>
+        </div>
+      )}
+
+      {/* ── Error ────────────────────────────────────────────────────────── */}
+      {status === 'error' && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 border border-border rounded-sm bg-surface p-8 text-center">
+          <AlertTriangle className="w-6 h-6 text-semantic-warning" />
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-text-primary">Narrative chưa hoàn tất</p>
+            <p className="text-xs text-text-secondary max-w-md leading-relaxed">{error}</p>
+          </div>
+          <button
+            onClick={handleRun}
+            className="flex items-center gap-2 px-4 py-2 bg-brand-primary text-white text-xs font-semibold rounded-sm hover:opacity-90"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />Thử lại
+          </button>
+        </div>
+      )}
+
+      {/* ── Streaming ────────────────────────────────────────────────────── */}
+      {status === 'streaming' && (
+        <div className="flex-1 border border-border rounded-sm bg-surface flex flex-col min-h-0">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0">
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-primary" />
+            <span className="text-xs text-text-secondary">CAE đang ghép narrative...</span>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 min-h-0 space-y-2">
+            {content ? (
+              <p className="text-xs text-text-primary leading-relaxed whitespace-pre-wrap">{content}</p>
+            ) : (
+              <div className="space-y-2 animate-pulse">
+                <div className="h-3 w-3/4 bg-background-tertiary rounded" />
+                <div className="h-3 w-full bg-background-tertiary rounded" />
+                <div className="h-3 w-[90%] bg-background-tertiary rounded" />
+                <div className="h-3 w-[85%] bg-background-tertiary rounded" />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Done ─────────────────────────────────────────────────────────── */}
       {status === 'done' && (
-        <button onClick={onNext} className="flex items-center justify-center gap-2 w-full py-2 border border-border text-text-secondary text-xs font-semibold rounded-sm hover:bg-background-secondary shrink-0">
-          Tiếp tục — Sinh nháp báo cáo <ChevronRight className="w-3.5 h-3.5" />
-        </button>
+        <div className="border border-border rounded-sm bg-surface flex flex-col flex-1 min-h-0">
+          {/* Header */}
+          <div className="px-3 py-2 border-b border-border shrink-0 flex items-center gap-2">
+            <span className="text-xs font-semibold text-text-primary flex-1">Narrative</span>
+
+            {/* Restored from DB badge */}
+            {restoredAt && streamBlocks.length === 0 && (
+              <span className="text-[10px] text-text-tertiary border border-border rounded-sm px-1.5 py-0.5 flex items-center gap-1">
+                <Database className="w-2.5 h-2.5" />
+                {new Date(restoredAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
+
+            {/* Findings toggle */}
+            <button
+              onClick={() => setShowFindings(v => !v)}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded-sm text-[11px] font-medium border transition-colors ${
+                showFindings
+                  ? 'border-brand-primary/30 bg-brand-light/10 text-brand-primary'
+                  : 'border-border bg-background-secondary text-text-secondary hover:border-brand-primary/30 hover:text-text-primary'
+              }`}
+            >
+              <Activity className="w-3 h-3" />
+              {sample.annotations.length} findings
+            </button>
+
+            {/* Feedback badge */}
+            {feedback && (
+              <span className={`text-[10px] font-medium px-2 py-0.5 rounded-sm border ${
+                feedback === 'accepted'
+                  ? 'border-semantic-success/30 bg-semantic-success/10 text-semantic-success'
+                  : 'border-semantic-error/30 bg-semantic-error/10 text-semantic-error'
+              }`}>
+                {feedback === 'accepted' ? 'Chấp nhận' : 'Cần sửa'}
+              </span>
+            )}
+          </div>
+
+          {/* Findings drawer — collapsible horizontal strip */}
+          {showFindings && (
+            <div className="border-b border-border bg-background-secondary shrink-0 px-3 py-2">
+              <div className="flex gap-2 overflow-x-auto pb-0.5">
+                {sample.annotations.map((annotation, index) => (
+                  <button
+                    key={annotation.id}
+                    onClick={() => onFocusIdx(focusedIdx === index ? null : index)}
+                    className={`shrink-0 rounded-sm border px-2.5 py-1.5 text-left transition-colors ${
+                      focusedIdx === index
+                        ? 'border-brand-primary bg-brand-light/10'
+                        : 'border-border bg-surface hover:border-brand-primary/50'
+                    }`}
+                  >
+                    <p className="text-[11px] font-medium text-text-primary whitespace-nowrap">{catShort(annotation.categoryId, annotation.category)}</p>
+                    <p className="text-[10px] text-text-tertiary mt-0.5 whitespace-nowrap">{annotation.category}</p>
+                  </button>
+                ))}
+                {liveCitations.length > 0 && (
+                  <>
+                    <div className="w-px bg-border shrink-0 mx-1" />
+                    {liveCitations.map((citation) => (
+                      <button
+                        key={citation.num}
+                        onClick={() => onCitation(citation.num)}
+                        className="shrink-0 rounded-sm border border-border bg-surface px-2.5 py-1.5 text-left hover:border-brand-primary/50 hover:bg-brand-light/10 transition-colors max-w-[180px]"
+                      >
+                        <p className="text-[10px] font-bold text-brand-primary whitespace-nowrap">[{citation.num}] <span className="font-medium text-text-primary truncate">{citation.ref}</span></p>
+                        <p className="text-[10px] text-text-tertiary mt-0.5 truncate">{citation.passage}</p>
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Narrative content */}
+          <div className="flex-1 overflow-y-auto p-4 min-h-0">
+            {blocks.length > 0 ? (
+              <BlockRenderer blocks={blocks} onCitationClick={handleCitationSelect} />
+            ) : (
+              <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">{content}</p>
+            )}
+          </div>
+
+          {/* Footer: feedback + actions */}
+          <div className="px-3 py-2 border-t border-border shrink-0 flex items-center gap-2">
+            <button
+              onClick={() => setFeedback('accepted')}
+              className={`px-2.5 py-1 rounded-sm text-[11px] font-semibold border transition-colors ${
+                feedback === 'accepted'
+                  ? 'bg-semantic-success text-white border-semantic-success'
+                  : 'border-border text-text-secondary hover:border-semantic-success/50 hover:text-semantic-success hover:bg-semantic-success/5'
+              }`}
+            >
+              Chấp nhận
+            </button>
+            <button
+              onClick={() => setFeedback('rejected')}
+              className={`px-2.5 py-1 rounded-sm text-[11px] font-semibold border transition-colors ${
+                feedback === 'rejected'
+                  ? 'bg-semantic-error text-white border-semantic-error'
+                  : 'border-border text-text-secondary hover:border-semantic-error/50 hover:text-semantic-error hover:bg-semantic-error/5'
+              }`}
+            >
+              Cần sửa
+            </button>
+            <button
+              onClick={() => { setFeedback(null); handleRun(); }}
+              className="flex items-center gap-1 text-[10px] text-text-tertiary hover:text-text-primary transition-colors"
+            >
+              <RefreshCw className="w-3 h-3" />Chạy lại
+            </button>
+            <button
+              onClick={onNext}
+              className="flex items-center gap-1.5 ml-auto px-3 py-1.5 bg-brand-primary text-white text-[11px] font-semibold rounded-sm hover:opacity-90 transition-opacity"
+            >
+              Tiếp tục — Sinh nháp <ChevronRight className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
 }
 
 // ─── Step 3: Draft ─────────────────────────────────────────────────────────
-function DraftPanel({ episodeId, sample }: { episodeId: string; sample: PcxrSample }) {
-  const [status, setStatus] = useState<'idle' | 'generating' | 'done'>('idle');
-  const [genText, setGenText] = useState('');
-  const [fields, setFields] = useState<DraftField[]>(INITIAL_DRAFT);
-  const [msgs, setMsgs] = useState<ChatMsg[]>([]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [pending, setPending] = useState<PendingChange | null>(null);
+function DraftPanel({
+  episodeId,
+  sample,
+  caseInfo,
+  highlightedFieldKey,
+  onCitation,
+  onCitationsLoaded,
+  onStructuredCitationsLoaded,
+}: {
+  episodeId: string;
+  sample: PcxrSample;
+  caseInfo: CaseInfo;
+  highlightedFieldKey: string | null;
+  onCitation: (n: number) => void;
+  onCitationsLoaded: (cits: Citation[]) => void;
+  onStructuredCitationsLoaded?: (cits: CitationAnchor[]) => void;
+}) {
+  const [fields, setFields] = useState<DraftField[]>([]);
   const [approved, setApproved] = useState(false);
-  const endRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs]);
+  const [hasStarted, setHasStarted] = useState(false);
+  const [previewMode, setPreviewMode] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState(true);
+  const [restoredDraftId, setRestoredDraftId] = useState<string | null>(null);
+  const fieldRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const findingIds = sample.annotations.map((annotation) => String(annotation.id));
+  const {
+    isStreaming,
+    blocks,
+    citations,
+    content,
+    error,
+    startDraft,
+    abort,
+    reset,
+  } = useCAEStream();
+
+  // Restore latest draft from DB on mount (persist across page reloads)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setIsRestoring(true);
+      try {
+        const saved = await getLatestDraft(episodeId);
+        if (!cancelled && saved && saved.fields?.length > 0) {
+          setFields(mapDraftFields(saved.fields as Parameters<typeof mapDraftFields>[0]));
+          setHasStarted(true);
+          setRestoredDraftId(saved.draft_id);
+          if (saved.status === 'approved') setApproved(true);
+        }
+      } finally {
+        if (!cancelled) setIsRestoring(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [episodeId]);
+
+  const streamedFields = useMemo(() => mapPatchBlocksToDraftFields(blocks), [blocks]);
+  const liveCitations = useMemo(
+    () => citations.map((citation, index) => mapStructuredCitation(citation, index)),
+    [citations]
+  );
+  const status = !hasStarted
+    ? (isRestoring ? 'restoring' : 'idle')
+    : isStreaming ? 'generating' : error ? 'error' : 'done';
+
+  useEffect(() => {
+    if (streamedFields.length > 0) {
+      setFields(streamedFields);
+    }
+  }, [streamedFields]);
+
+  // When a new draft stream completes, invalidate the draft cache so the next
+  // page-load restore will fetch the freshly saved version from the database.
+  useEffect(() => {
+    if (hasStarted && !isStreaming && !error && streamedFields.length > 0) {
+      invalidateDraftCache(episodeId);
+    }
+  }, [hasStarted, isStreaming, error, streamedFields.length, episodeId]);
+
+  useEffect(() => {
+    onCitationsLoaded(liveCitations);
+  }, [liveCitations, onCitationsLoaded]);
+
+  useEffect(() => {
+    onStructuredCitationsLoaded?.(citations);
+  }, [citations, onStructuredCitationsLoaded]);
+
+  useEffect(() => () => {
+    abort();
+    reset();
+  }, [abort, reset]);
+
+  useEffect(() => {
+    if (!highlightedFieldKey) return;
+
+    const matchedField = fields.find(field => matchesFieldKey(field, highlightedFieldKey));
+    if (!matchedField) {
+      return;
+    }
+
+    fieldRefs.current[matchedField.key]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [fields, highlightedFieldKey]);
 
   const handleGenerate = async () => {
-    setStatus('generating');
-    try {
-      const res = await generateDraft(episodeId, 'default', {
-        image_id: sample.imageId,
-        detections: sample.annotations.map(a => ({ bbox: a.bbox, label: a.category, score: mockScore(a.id) })),
-      });
-      if (res.success && res.fields) {
-        const mappedFields: DraftField[] = (res.fields ?? []).map((f: any) => ({
-          key: f.field_id,
-          label: f.label,
-          value: f.value ?? '',
-          modified: false,
-          type: f.source === 'locked' ? 'readonly' : f.source === 'ai' ? 'ai' : 'required',
-          rows: f.value && f.value.length > 80 ? 3 : 2,
-        }));
-        if (mappedFields.length > 0) {
-          const preview = mappedFields.filter(f => f.type === 'ai').map(f => `${f.label}:\n${f.value}`).join('\n\n');
-          streamText(preview, setGenText, () => { setStatus('done'); setGenText(''); setFields(mappedFields); });
-          return;
-        }
-      }
-    } catch { /* fall through to mock */ }
-    // Fallback to mock
-    const preview = INITIAL_DRAFT.filter(f => f.type === 'ai').map(f => `${f.label}:\n${f.value}`).join('\n\n');
-    streamText(preview, setGenText, () => { setStatus('done'); setGenText(''); });
+    setHasStarted(true);
+    setApproved(false);
+    setFields([]);
+    setRestoredDraftId(null);
+    invalidateDraftCache(episodeId);
+    onCitationsLoaded([]);
+    onStructuredCitationsLoaded?.([]);
+    await startDraft(episodeId, 'default', buildDetectionPayload(sample), { findingIds });
   };
-  const handleSend = () => {
-    const cmd = input.trim(); if (!cmd) return;
-    setInput(''); setMsgs(m => [...m, { role: 'user', content: cmd }]); setLoading(true);
-    setTimeout(() => {
-      const adj = getDraftAdjustment(cmd, fields);
-      if (adj) { setPending(adj); setMsgs(m => [...m, { role: 'assistant', content: `Đề xuất chỉnh trường "${adj.label}" sẵn sàng.` }]); }
-      else setMsgs(m => [...m, { role: 'assistant', content: 'Không xác định trường cần sửa. Thử: "Thêm vào Khuyến nghị...", "Viết lại Gợi ý CĐ ngắn hơn".' }]);
-      setLoading(false);
-    }, 1200);
+
+  const handleCitationSelect = (citationId: string) => {
+    const parsedId = Number.parseInt(citationId, 10);
+    if (Number.isFinite(parsedId)) {
+      onCitation(parsedId);
+    }
   };
-  const acceptChange = () => {
-    if (!pending) return;
-    setFields(fs => fs.map(f => f.key === pending.fieldKey ? { ...f, value: pending.newValue, modified: true } : f));
-    setPending(null);
+
+  const overviewBlocks = blocks.filter((block) => block.type !== 'field_patch');
+  const invalidReviewFields = fields.filter((field) => field.status !== 'valid');
+  const hasBlockedField = fields.some((field) => field.status === 'policy_blocked');
+
+  const pickFieldValue = (...keywords: string[]) => {
+    const lowerKeywords = keywords.map((k) => k.toLowerCase());
+    const match = fields.find((field) => {
+      const target = `${field.key} ${field.label}`.toLowerCase();
+      return lowerKeywords.some((keyword) => target.includes(keyword));
+    });
+    return String(match?.value ?? '').trim();
   };
+
+  const requiredSections = [
+    { label: 'Lý do chỉ định chụp', value: pickFieldValue('lý do', 'chief_complaint') },
+    { label: 'Mô tả hình ảnh', value: pickFieldValue('x-quang', 'detection', 'mô tả') },
+    { label: 'Kết luận', value: pickFieldValue('đánh giá', 'impression', 'kết luận') },
+  ];
+  const missingRequiredSections = requiredSections.filter((section) => !section.value);
+  const canFinalize = !hasBlockedField && missingRequiredSections.length === 0;
+  const finalizeBlockReason = hasBlockedField
+    ? 'Còn field bị policy chặn, chưa thể ký chính thức.'
+    : missingRequiredSections.length > 0
+      ? `Thiếu mục bắt buộc: ${missingRequiredSections.map((section) => section.label).join(', ')}.`
+      : null;
+
+  const buildReportData = (mode: 'draft' | 'official') => {
+    const isOfficial = mode === 'official' && canFinalize;
+    const fallback = (v: string) => String(v ?? '').trim() || 'Chưa ghi nhận trong hồ sơ tại thời điểm lập báo cáo.';
+    return {
+      isOfficial,
+      generatedAt: new Date().toLocaleString('vi-VN'),
+      indication:     fallback(pickFieldValue('lý do', 'chief_complaint')),
+      vitals:         fallback(pickFieldValue('sinh hiệu', 'vitals')),
+      labs:           fallback(pickFieldValue('xét nghiệm', 'labs')),
+      findings:       fallback(pickFieldValue('x-quang', 'detection', 'mô tả') || sample.annotations.map((a) => `${catShort(a.categoryId, a.category)} (${Math.round(mockScore(a.id) * 100)}%)`).join('; ')),
+      impression:     fallback(pickFieldValue('đánh giá', 'kết luận', 'impression')),
+      recommendation: fallback(pickFieldValue('đề xuất', 'xử lý', 'recommend')),
+      doctorNote:     fallback(pickFieldValue('ghi chú', 'note')),
+    };
+  };
+
+  /** Open the print/preview page in a new tab — browser handles PDF via Ctrl+P */
+  const handlePrint = (mode: 'draft' | 'official' = 'draft') => {
+    const d = buildReportData(mode);
+    const detections = sample.annotations.map((a) => ({
+      label: catShort(a.categoryId, a.category),
+      confidence: `${Math.round(mockScore(a.id) * 100)}%`,
+    }));
+    const auditFields = fields.map((f) => ({
+      label: f.label, source: f.source, status: f.status,
+      provenance: f.provenance.length,
+      value: (f.value ?? '').slice(0, 180),
+    }));
+    const params = new URLSearchParams({
+      imageId:        sample.imageId,
+      age:            caseInfo.age,
+      gender:         caseInfo.gender,
+      date:           caseInfo.date,
+      episodeId,
+      official:       d.isOfficial ? '1' : '0',
+      indication:     encodeURIComponent(d.indication),
+      vitals:         encodeURIComponent(d.vitals),
+      labs:           encodeURIComponent(d.labs),
+      findings:       encodeURIComponent(d.findings),
+      impression:     encodeURIComponent(d.impression),
+      recommendation: encodeURIComponent(d.recommendation),
+      doctorNote:     encodeURIComponent(d.doctorNote),
+      imgSrc:         sample.imgSrc,
+      detections:     encodeURIComponent(JSON.stringify(detections)),
+      fields:         encodeURIComponent(JSON.stringify(auditFields)),
+    });
+    window.open(`/cases/${episodeId}/print?${params.toString()}`, '_blank');
+  };
+
+  /** Build inline HTML for srcdoc preview — instant, no blob URL, native font rendering */
+  const handlePreview = (mode: 'draft' | 'official' = 'draft') => {
+    const d = buildReportData(mode);
+    const esc = (v: string) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const statusColor = d.isOfficial ? '#166534' : '#b45309';
+    const statusText  = d.isOfficial ? 'BẢN CHÍNH THỨC — ĐÃ DUYỆT' : 'BẢN NHÁP — CHƯA CÓ GIÁ TRỊ PHÁP LÝ';
+
+    const detectionRows = sample.annotations.map((ann, i) => `
+      <tr>
+        <td>${i + 1}</td><td>${esc(catShort(ann.categoryId, ann.category))}</td>
+        <td>${Math.round(mockScore(ann.id) * 100)}%</td><td>[${ann.bbox.join(', ')}]</td>
+      </tr>`).join('');
+
+    const fieldRows = fields.map((f, i) => {
+      const val = (f.value ?? '').length > 160 ? `${(f.value ?? '').slice(0, 160)}…` : (f.value ?? '');
+      return `<tr>
+        <td>${i + 1}</td><td>${esc(f.label)}</td><td>${esc(f.source)}</td>
+        <td>${esc(f.status)}</td><td>${f.provenance.length}</td>
+        <td style="max-width:160px;word-break:break-word;">${esc(val || '—')}</td>
+      </tr>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html><html lang="vi"><head><meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 20mm 15mm 20mm 30mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Times New Roman', Times, serif; font-size: 13pt; color: #111; background: #f3f4f6; margin: 0; padding: 20px 0; }
+  .page { background: #fff; width: 794px; min-height: 1123px; margin: 0 auto 32px; padding: 28mm 20mm 20mm 28mm; box-shadow: 0 2px 16px rgba(0,0,0,.15); position: relative; }
+  .draft-wm { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%) rotate(-40deg); font-size: 80pt; font-weight: 900; color: rgba(0,0,0,.04); white-space: nowrap; pointer-events: none; }
+  h1 { font-size: 15pt; font-weight: 700; text-align: center; text-transform: uppercase; margin: 8pt 0 3pt; }
+  .status { text-align: center; font-size: 10pt; font-weight: 700; color: ${statusColor}; margin-bottom: 12pt; }
+  .sec-title { font-size: 11pt; font-weight: 700; margin: 10pt 0 3pt; }
+  p { margin: 2pt 0 5pt; line-height: 1.5; }
+  table.info { width: 100%; border-collapse: collapse; margin: 8pt 0 12pt; font-size: 11pt; }
+  table.info td { border: 1px solid #94a3b8; padding: 5pt 7pt; }
+  table.data { width: 100%; border-collapse: collapse; font-size: 10pt; margin: 6pt 0 12pt; }
+  table.data th { border: 1px solid #94a3b8; background: #f1f5f9; padding: 3pt 5pt; text-align: left; }
+  table.data td { border: 1px solid #cbd5e1; padding: 3pt 5pt; vertical-align: top; }
+  .hdr { display: flex; justify-content: space-between; font-size: 11pt; margin-bottom: 2pt; }
+  .sign { display: flex; justify-content: space-around; margin-top: 20pt; gap: 16pt; }
+  .sign-col { width: 44%; text-align: center; }
+  .sign-col .role { font-size: 11pt; font-weight: 700; text-transform: uppercase; letter-spacing: .3pt; margin-bottom: 2pt; }
+  .sign-col .note { font-size: 9.5pt; color: #475569; font-style: italic; margin-bottom: 0; }
+  .sign-col .date-line { font-size: 9.5pt; color: #475569; margin-bottom: 2pt; }
+  .sign-line { border-top: 1px solid #334155; margin-top: 32pt; padding-top: 4pt; font-size: 10pt; text-align: center; }
+  .xray-block {
+    display: flex; gap: 16pt; align-items: flex-start;
+    margin: 6pt 0 12pt;
+    background: #f8fafc; border: 1px solid #e2e8f0;
+    border-radius: 4pt; padding: 10pt;
+  }
+  .xray-fig { flex-shrink: 0; text-align: center; }
+  .xray-fig img {
+    width: 96pt; height: 96pt; object-fit: cover;
+    border: 1px solid #94a3b8; display: block;
+    border-radius: 2pt;
+  }
+  .xray-fig figcaption { font-size: 7.5pt; color: #64748b; margin-top: 4pt; font-style: italic; }
+  .xray-text { flex: 1; font-size: 12pt; line-height: 1.65; color: #111; }
+  @media print { body { background: #fff; padding: 0; } .page { box-shadow: none; margin: 0; width: auto; min-height: auto; } .page-break { page-break-before: always; } }
+</style></head><body>
+<div class="page">
+  ${!d.isOfficial ? '<div class="draft-wm">NHÁP</div>' : ''}
+  <div class="hdr">
+    <div><strong>BỆNH VIỆN NHI TRUNG ƯƠNG</strong><br><small>Khoa Chẩn đoán hình ảnh</small></div>
+    <div style="text-align:right;font-size:11pt;">Số phiếu: XR-${esc(sample.imageId.toUpperCase())}<br>Mã hồ sơ: EP-${esc(episodeId)}</div>
+  </div>
+  <hr style="border-top:1.5px solid #64748b;margin:5pt 0;">
+  <h1>Phiếu Báo Cáo X-Quang Lồng Ngực</h1>
+  <div class="status">${statusText}</div>
+
+  <div class="sec-title">I. THÔNG TIN HÀNH CHÍNH</div>
+  <table class="info"><tbody>
+    <tr><td><strong>Bệnh nhân:</strong> ${esc(caseInfo.age)} · ${esc(caseInfo.gender)}</td><td><strong>Mã hình:</strong> ${esc(sample.imageId)}</td></tr>
+    <tr><td><strong>Ngày chụp:</strong> ${esc(caseInfo.date)}</td><td><strong>Tạo báo cáo:</strong> ${esc(d.generatedAt)}</td></tr>
+    <tr><td>Nguồn: CAE · WebRAG AI Engine</td><td>Trạng thái: ${esc(d.isOfficial ? 'Chính thức' : 'Nháp')}</td></tr>
+  </tbody></table>
+
+  <div class="sec-title">II. CHỈ ĐỊNH VÀ DỮ LIỆU LÂM SÀNG</div>
+  <p><strong>Lý do chỉ định:</strong> ${esc(d.indication)}</p>
+  <p><strong>Sinh hiệu:</strong> ${esc(d.vitals)}</p>
+  <p><strong>Xét nghiệm:</strong> ${esc(d.labs)}</p>
+
+  <div class="sec-title">III. MÔ TẢ HÌNH ẢNH</div>
+  <div class="xray-block">
+    <figure class="xray-fig">
+      <img src="${esc(sample.imgSrc)}" alt="X-quang">
+      <figcaption>Hình X-quang · ${esc(sample.imageId)}</figcaption>
+    </figure>
+    <div class="xray-text">${esc(d.findings)}</div>
+  </div>
+
+  <div class="sec-title">IV. KẾT LUẬN</div>
+  <p>${esc(d.impression)}</p>
+
+  <div class="sec-title">V. ĐỀ NGHỊ / HƯỚNG XỬ TRÍ</div>
+  <p>${esc(d.recommendation)}</p>
+
+  <div class="sec-title">VI. GHI CHÚ BÁC SĨ</div>
+  <p>${esc(d.doctorNote)}</p>
+
+  <div class="sign">
+    <div class="sign-col">
+      <p class="date-line">${esc(d.generatedAt)}</p>
+      <p class="role">Người lập phiếu</p>
+      <p class="note">(Ký, ghi rõ họ tên)</p>
+      <div class="sign-line"></div>
+    </div>
+    <div class="sign-col">
+      <p class="date-line">&nbsp;</p>
+      <p class="role">Bác sĩ chẩn đoán hình ảnh</p>
+      <p class="note">(Ký, ghi rõ họ tên)</p>
+      <div class="sign-line">${d.isOfficial
+        ? '<strong style="color:#166534;font-style:normal;">ĐÃ KÝ XÁC NHẬN</strong>'
+        : ''}</div>
+    </div>
+  </div>
+</div>
+
+<div class="page page-break">
+  <div class="sec-title" style="font-size:14pt;">PHỤ LỤC KỸ THUẬT AI (NỘI BỘ)</div>
+  <p style="font-size:10pt;">Model: CAE → Draft composer &nbsp;|&nbsp; Image ID: ${esc(sample.imageId)} &nbsp;|&nbsp; ${esc(d.generatedAt)}</p>
+
+  <div class="sec-title" style="font-size:11pt;">1. Detection summary</div>
+  <table class="data"><thead><tr><th>#</th><th>Finding</th><th>Confidence</th><th>BBox</th></tr></thead>
+  <tbody>${detectionRows || '<tr><td colspan="4">Không có detection.</td></tr>'}</tbody></table>
+
+  <div class="sec-title" style="font-size:11pt;">2. Field provenance &amp; review states</div>
+  <table class="data"><thead><tr><th>#</th><th>Field</th><th>Source</th><th>Status</th><th>Prov.</th><th>Value</th></tr></thead>
+  <tbody>${fieldRows || '<tr><td colspan="6">Không có field.</td></tr>'}</tbody></table>
+</div>
+</body></html>`;
+
+    setPreviewHtml(html);
+    setPreviewMode(true);
+  };
+
+  /** Download PDF via @react-pdf/renderer — proper Vietnamese font, no print dialog */
+  const handleDownloadPdf = async (mode: 'draft' | 'official' = 'draft') => {
+    const d = buildReportData(mode);
+    await downloadReportPDF({
+      isOfficial:     d.isOfficial,
+      patientRef:     caseInfo.patientRef,
+      age:            caseInfo.age,
+      gender:         caseInfo.gender,
+      date:           caseInfo.date,
+      symptoms:       caseInfo.symptoms,
+      spo2:           caseInfo.spo2,
+      crp:            caseInfo.crp,
+      episodeId,
+      generatedAt:    d.generatedAt,
+      indication:     d.indication,
+      vitals:         d.vitals,
+      labs:           d.labs,
+      findings:       d.findings,
+      impression:     d.impression,
+      recommendation: d.recommendation,
+      doctorNote:     d.doctorNote,
+      detections: sample.annotations.map(a => ({
+        label:      catShort(a.categoryId, a.category),
+        confidence: `${Math.round(mockScore(a.id) * 100)}%`,
+      })),
+    });
+  };
+
+  if (status === 'restoring') return (
+    <div className="flex-1 flex flex-col items-center justify-center gap-3 border border-border rounded-sm bg-surface p-8">
+      <Loader2 className="w-6 h-6 animate-spin text-text-tertiary" />
+      <p className="text-xs text-text-secondary">Đang khôi phục nháp báo cáo...</p>
+    </div>
+  );
 
   if (status === 'idle') return (
     <div className="flex-1 flex flex-col items-center justify-center gap-3 border border-border rounded-sm bg-surface p-8">
@@ -903,103 +1497,305 @@ function DraftPanel({ episodeId, sample }: { episodeId: string; sample: PcxrSamp
     </div>
   );
 
+  if (status === 'error') return (
+    <div className="flex-1 flex flex-col items-center justify-center gap-3 border border-border rounded-sm bg-surface p-8 text-center">
+      <AlertTriangle className="w-8 h-8 text-semantic-warning" />
+      <div className="space-y-1">
+        <p className="text-sm font-semibold text-text-primary">CAE chưa tạo được nháp báo cáo</p>
+        <p className="text-xs text-text-secondary max-w-md leading-relaxed">{error}</p>
+      </div>
+      <button onClick={handleGenerate} className="flex items-center gap-2 px-4 py-2 bg-brand-primary text-white text-xs font-semibold rounded-sm hover:opacity-90">
+        <RefreshCw className="w-3.5 h-3.5" />Tạo lại nháp
+      </button>
+    </div>
+  );
+
   if (status === 'generating') return (
     <div className="flex-1 border border-border rounded-sm bg-surface flex flex-col">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0">
         <Loader2 className="w-3.5 h-3.5 animate-spin text-text-tertiary" />
         <span className="text-xs font-semibold text-text-primary">Đang sinh nháp...</span>
       </div>
-      <div className="flex-1 p-4 font-mono text-[11px] text-text-secondary leading-relaxed whitespace-pre-wrap overflow-auto">
-        {genText}<span className="inline-block w-0.5 h-3.5 bg-brand-primary ml-0.5 animate-pulse" />
+      <div className="flex-1 p-4 grid grid-cols-[minmax(0,1fr)_260px] gap-3 min-h-0">
+        <div className="rounded-sm border border-border bg-background-secondary p-4 animate-pulse space-y-3 overflow-hidden">
+          <div className="h-3 w-32 bg-background-tertiary rounded" />
+          <div className="grid grid-cols-3 gap-3">
+            {[0, 1, 2].map((index) => (
+              <div key={index} className="rounded-sm border border-border bg-background px-3 py-3">
+                <div className="h-2 w-16 bg-background-tertiary rounded" />
+                <div className="h-6 w-10 bg-background-tertiary rounded mt-3" />
+              </div>
+            ))}
+          </div>
+          <div className="space-y-2">
+            {[0, 1, 2, 3].map((index) => (
+              <div key={index} className="rounded-sm border border-border bg-background px-3 py-3 space-y-2">
+                <div className="h-2 w-24 bg-background-tertiary rounded" />
+                <div className="h-3 w-full bg-background-tertiary rounded" />
+                <div className="h-3 w-[88%] bg-background-tertiary rounded" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-sm border border-border bg-background-secondary p-4 space-y-3">
+          <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">Composer pipeline</p>
+          {[
+            'Đối chiếu detection với template báo cáo.',
+            'Tạo patch theo từng field có provenance.',
+            'Đưa field cần rà soát sang hàng đợi bác sĩ.'
+          ].map((item) => (
+            <div key={item} className="rounded-sm border border-border bg-background px-3 py-2 text-xs text-text-secondary leading-relaxed">
+              {item}
+            </div>
+          ))}
+          <div className="rounded-sm border border-brand-primary/30 bg-brand-light/10 px-3 py-2 text-xs text-text-secondary leading-relaxed">
+            Dock vẫn có thể highlight field hoặc mở run trước đó trong lúc composer đang chạy.
+          </div>
+          {content && (
+            <div className="rounded-sm border border-border bg-background px-3 py-2 text-[11px] text-text-tertiary leading-relaxed max-h-32 overflow-y-auto whitespace-pre-wrap">
+              {content}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 
+  const reviewCounts = fields.reduce(
+    (counts, field) => {
+      if (field.status === 'policy_blocked') counts.blocked += 1;
+      else if (field.status === 'needs_review') counts.review += 1;
+      else counts.ready += 1;
+      return counts;
+    },
+    { ready: 0, review: 0, blocked: 0 }
+  );
+
   return (
-    <div className="flex gap-3 flex-1 min-h-0">
-      <div className="flex-1 flex flex-col gap-3 min-w-0 min-h-0">
-        <div className="border border-border rounded-sm bg-surface flex flex-col flex-1 min-h-0">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
-            <span className="text-xs font-semibold text-text-primary">Nháp báo cáo do CAE hỗ trợ</span>
-            {approved
-              ? <span className="text-[10px] font-semibold text-semantic-success bg-semantic-success/10 border border-semantic-success/30 px-1.5 py-0.5 rounded-sm">✓ Đã duyệt</span>
-              : <span className="text-[10px] font-semibold text-semantic-warning bg-semantic-warning/5 border border-semantic-warning/30 px-1.5 py-0.5 rounded-sm">Nháp · Chưa duyệt</span>}
-          </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-3">
-            {fields.map(f => {
-              const ip = pending?.fieldKey === f.key;
-              return (
-                <div key={f.key}>
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <label className="text-[10px] font-semibold text-text-tertiary">{f.label}</label>
-                    <span className={`text-[10px] px-1 py-0.5 bg-background-tertiary border border-border rounded-sm ${f.type === 'required' ? 'text-semantic-error' : 'text-text-tertiary'}`}>
-                      {f.type === 'ai' ? 'AI đề xuất' : f.type === 'required' ? 'BS điền *' : 'Chỉ đọc'}
-                    </span>
-                    {f.modified && <span className="text-[10px] text-brand-primary font-medium ml-auto">● Đã sửa</span>}
-                  </div>
-                  {ip && pending && (
-                    <div className="mb-1.5 border border-brand-primary/30 rounded-sm bg-brand-light/20 p-2">
-                      <p className="text-[10px] font-semibold text-brand-primary mb-1.5">Đề xuất thay đổi:</p>
-                      <p className="text-[11px] text-text-tertiary line-through leading-relaxed">{f.value}</p>
-                      <p className="text-[11px] text-text-primary leading-relaxed mt-1">{pending.newValue}</p>
-                      <div className="flex gap-1.5 mt-2">
-                        <button onClick={acceptChange} className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-sm bg-semantic-success text-white font-medium"><Check className="w-3 h-3" />Chấp nhận</button>
-                        <button onClick={() => setPending(null)} className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-sm border border-border text-text-secondary"><X className="w-3 h-3" />Bỏ qua</button>
-                      </div>
-                    </div>
-                  )}
-                  <textarea value={f.value}
-                    onChange={e => { if (f.type !== 'readonly') setFields(fs => fs.map(x => x.key === f.key ? { ...x, value: e.target.value, modified: true } : x)); }}
-                    rows={f.rows} readOnly={f.type === 'readonly' || approved}
-                    placeholder={f.type === 'required' ? 'Bác sỹ nhập...' : undefined}
-                    className={`w-full text-xs border rounded-sm px-2.5 py-2 leading-relaxed resize-none focus:outline-none focus:border-brand-primary ${
-                      f.type === 'readonly' ? 'bg-background-secondary text-text-tertiary border-border cursor-default'
-                      : f.modified ? 'bg-brand-light/10 border-brand-primary/30 text-text-primary'
-                      : 'bg-background border-border text-text-primary placeholder:text-text-tertiary'}`}
-                  />
-                </div>
-              );
-            })}
-          </div>
-          {!approved && (
-            <div className="shrink-0 border-t border-border px-3 py-2 flex items-center gap-2">
-              <p className="text-[10px] text-text-tertiary flex-1">Đọc kỹ trước khi xác nhận.</p>
-              <button className="text-xs px-3 py-1.5 rounded-sm border border-border text-text-secondary hover:bg-background-secondary">Xuất PDF</button>
-              <button onClick={() => setApproved(true)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-sm bg-semantic-success text-white font-semibold hover:opacity-90">
-                <Check className="w-3.5 h-3.5" />BS Xác nhận & Lưu
-              </button>
-            </div>
-          )}
-          {approved && (
-            <div className="shrink-0 border-t border-border px-3 py-2 flex items-center gap-2 bg-semantic-success/5">
-              <Check className="w-3.5 h-3.5 text-semantic-success" />
-              <p className="text-xs text-semantic-success font-medium">Báo cáo đã xác nhận · Audit trail ghi nhận</p>
-            </div>
-          )}
-        </div>
-      </div>
-      {!approved && (
-        <div className="w-56 shrink-0 border border-border rounded-sm bg-surface flex flex-col">
-          <div className="px-3 py-2 border-b border-border shrink-0"><span className="text-xs font-semibold text-text-primary">CAE điều chỉnh nháp</span></div>
-          <div className="flex-1 overflow-y-auto p-2 space-y-1.5 min-h-0">
-            {msgs.length === 0 && ['Thêm theo dõi SpO₂ mỗi 4 giờ', 'Viết lại gợi ý CĐ ngắn hơn', 'Thêm phổi trái bình thường'].map(s => (
-              <button key={s} onClick={() => setInput(s)} className="w-full text-left text-[10px] px-2 py-1.5 border border-border rounded-sm text-text-secondary hover:bg-background-secondary hover:border-brand-primary transition-colors">{s}</button>
-            ))}
-            {msgs.map((m, i) => (
-              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-full px-2 py-1.5 rounded-sm text-[11px] leading-relaxed ${m.role === 'user' ? 'bg-brand-primary text-white' : 'bg-background-secondary border border-border text-text-primary'}`}>{m.content}</div>
-              </div>
-            ))}
-            {loading && <div className="flex justify-start"><div className="px-2 py-1.5 rounded-sm bg-background-secondary border border-border flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin text-text-tertiary" /><span className="text-[10px] text-text-tertiary">Xử lý...</span></div></div>}
-            <div ref={endRef} />
-          </div>
-          <div className="shrink-0 border-t border-border p-2 flex gap-1.5">
-            <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
-              placeholder="Mô tả chỉnh sửa..." className="flex-1 text-[11px] border border-border rounded-sm px-2 py-1.5 bg-background focus:outline-none focus:border-brand-primary text-text-primary placeholder:text-text-tertiary" />
-            <button onClick={handleSend} disabled={!input.trim() || loading || !!pending} className="w-7 h-7 flex items-center justify-center rounded-sm bg-brand-primary text-white disabled:opacity-40"><Send className="w-3 h-3" /></button>
-          </div>
+    <div className="flex flex-col flex-1 min-h-0 gap-3">
+      {/* CAE overview (decision / comparison) — collapsible summary above fields */}
+      {!previewMode && overviewBlocks.length > 0 && (
+        <div className="border border-border rounded-sm bg-surface p-3 shrink-0">
+          <BlockRenderer blocks={overviewBlocks} onCitationClick={handleCitationSelect} />
         </div>
       )}
+
+      {/* Main report card */}
+      <div className="border border-border rounded-sm bg-surface flex flex-col flex-1 min-h-0">
+        {/* Header: inline status + mode toggle */}
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0">
+          <div className="flex items-center gap-1.5 text-[10px] min-w-0">
+            <span className="font-semibold text-text-primary whitespace-nowrap">Nháp báo cáo</span>
+            <span className="text-text-tertiary">·</span>
+            <span className="font-medium text-semantic-success whitespace-nowrap">{reviewCounts.ready} sẵn sàng</span>
+            {reviewCounts.review > 0 && (
+              <><span className="text-text-tertiary">·</span>
+              <span className="font-medium text-semantic-warning whitespace-nowrap">{reviewCounts.review} rà soát</span></>
+            )}
+            {reviewCounts.blocked > 0 && (
+              <><span className="text-text-tertiary">·</span>
+              <span className="font-medium text-semantic-error whitespace-nowrap">{reviewCounts.blocked} blocked</span></>
+            )}
+          </div>
+          {approved
+            ? <span className="text-[10px] font-semibold text-semantic-success bg-semantic-success/10 border border-semantic-success/30 px-1.5 py-0.5 rounded-sm shrink-0">Đã duyệt</span>
+            : <span className="text-[10px] text-text-tertiary border border-border/50 px-1.5 py-0.5 rounded-sm shrink-0">Nháp</span>}
+          {restoredDraftId && !isStreaming && (
+            <span className="flex items-center gap-1 text-[10px] text-brand-primary border border-brand-primary/30 bg-brand-light/10 px-1.5 py-0.5 rounded-sm shrink-0">
+              <Database className="w-2.5 h-2.5" />Đã khôi phục
+            </span>
+          )}
+          {/* Edit / Preview toggle + preview actions — all in one row */}
+          <div className="ml-auto flex items-center gap-1 shrink-0">
+            {/* Save draft button */}
+            <button
+              onClick={() => {
+                const blob = new Blob(
+                  [JSON.stringify({ fields, approved, generatedAt: new Date().toISOString() }, null, 2)],
+                  { type: 'application/json' }
+                );
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `nhap-bao-cao-${episodeId.slice(0, 8)}-${Date.now()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              title="Lưu nháp (JSON)"
+              className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[10px] border border-border text-text-secondary hover:bg-background-secondary transition-colors"
+            >
+              <Save className="w-3 h-3" />Lưu
+            </button>
+
+            {/* Download PDF button — jsPDF direct download, no print dialog */}
+            <button
+              onClick={() => handleDownloadPdf(approved ? 'official' : 'draft')}
+              title="Tải PDF về máy ngay"
+              className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[10px] border border-border text-text-secondary hover:bg-background-secondary transition-colors"
+            >
+              <Download className="w-3 h-3" />Tải PDF
+            </button>
+
+            <div className="w-px h-3 bg-border mx-0.5" />
+
+            {previewMode && (
+              <>
+                <button
+                  onClick={() => handlePreview(approved ? 'official' : 'draft')}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[10px] border border-border text-text-secondary hover:bg-background-secondary"
+                >
+                  <RefreshCw className="w-3 h-3" />Làm mới
+                </button>
+                <div className="w-px h-3 bg-border mx-0.5" />
+              </>
+            )}
+            <div className="flex items-center gap-0.5 border border-border rounded-sm p-0.5 bg-background-secondary">
+              <button
+                onClick={() => setPreviewMode(false)}
+                className={`px-2 py-0.5 rounded-sm text-[10px] transition-colors ${!previewMode ? 'bg-surface text-text-primary shadow-sm' : 'text-text-tertiary hover:text-text-secondary'}`}
+              >
+                Chỉnh sửa
+              </button>
+              <button
+                onClick={() => handlePreview(approved ? 'official' : 'draft')}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded-sm text-[10px] transition-colors ${previewMode ? 'bg-surface text-text-primary shadow-sm' : 'text-text-tertiary hover:text-text-secondary'}`}
+              >
+                <Eye className="w-3 h-3" />Xem PDF
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Content: edit mode or PDF preview */}
+        <div className={`flex-1 min-h-0 ${previewMode ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+          {previewMode ? (
+            <div className="flex flex-col h-full bg-background-secondary">
+              {previewHtml ? (
+                <iframe
+                  title="Preview"
+                  srcDoc={previewHtml}
+                  className="flex-1 min-h-0 w-full border-0"
+                  sandbox="allow-scripts allow-same-origin allow-modals"
+                />
+              ) : (
+                <div className="flex-1 min-h-0 flex items-center justify-center p-6">
+                  <button
+                    onClick={() => handlePreview(approved ? 'official' : 'draft')}
+                    className="flex items-center gap-2 px-4 py-2 bg-brand-primary text-white text-xs font-semibold rounded-sm hover:opacity-90"
+                  >
+                    <Eye className="w-3.5 h-3.5" />Tạo xem trước
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Edit mode: field-by-field review */
+            <div className="p-3 space-y-3">
+              {fields.map(f => {
+                const isHighlighted = matchesFieldKey(f, highlightedFieldKey);
+                const isReadOnly = f.source === 'locked' || approved;
+                return (
+                  <div key={f.key} ref={(node) => { fieldRefs.current[f.key] = node; }} className={`rounded-sm border p-3 transition-colors ${isHighlighted ? 'border-brand-primary bg-brand-light/10' : 'border-border bg-background/40'}`}>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <label className="text-[10px] font-semibold text-text-tertiary">{f.label}</label>
+                      <span className={`text-[10px] px-1 py-0.5 bg-background-tertiary border border-border rounded-sm ${f.status === 'policy_blocked' ? 'text-semantic-error' : f.status === 'needs_review' ? 'text-semantic-warning' : 'text-text-tertiary'}`}>
+                        {f.status === 'policy_blocked' ? 'Bị policy chặn' : f.status === 'needs_review' ? 'Cần rà soát' : 'Sẵn sàng'}
+                      </span>
+                      <span className="text-[10px] px-1 py-0.5 bg-background-tertiary border border-border rounded-sm text-text-tertiary">
+                        {f.source === 'locked' ? 'Khoá' : f.source === 'manual' ? 'Thủ công' : 'AI đề xuất'}
+                      </span>
+                      {f.modified && <span className="text-[10px] text-brand-primary font-medium ml-auto">● Đã sửa</span>}
+                    </div>
+                    {f.provenance.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {f.provenance.slice(0, 2).map((citation, index) => (
+                          <span key={`${f.key}-citation-${index}`} className="text-[10px] px-1.5 py-0.5 rounded-sm border border-border bg-background-secondary text-text-secondary">
+                            {citation.document_title}
+                          </span>
+                        ))}
+                        {f.provenance.length > 2 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-sm border border-border bg-background-secondary text-text-tertiary">
+                            +{f.provenance.length - 2} nguồn
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    <textarea value={f.value}
+                      onChange={e => { if (!isReadOnly) setFields(fs => fs.map(x => x.key === f.key ? { ...x, value: e.target.value, modified: true, rows: getFieldRows(e.target.value) } : x)); }}
+                      rows={f.rows} readOnly={isReadOnly}
+                      placeholder={f.source === 'manual' ? 'Bác sỹ nhập...' : undefined}
+                      className={`w-full text-xs border rounded-sm px-2.5 py-2 leading-relaxed resize-none focus:outline-none focus:border-brand-primary ${
+                        isReadOnly ? 'bg-background-secondary text-text-tertiary border-border cursor-default'
+                        : f.modified ? 'bg-brand-light/10 border-brand-primary/30 text-text-primary'
+                        : 'bg-background border-border text-text-primary placeholder:text-text-tertiary'}`}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {!approved && (
+          <div className="shrink-0 border-t border-border px-3 py-2 flex items-center gap-2">
+            <p className="text-[10px] text-text-tertiary flex-1">
+              {finalizeBlockReason ?? 'Đọc kỹ trước khi xác nhận bản chính thức.'}
+            </p>
+            {previewMode ? (
+              <>
+                <button
+                  onClick={() => setPreviewMode(false)}
+                  className="text-xs px-3 py-1.5 rounded-sm border border-border text-text-secondary hover:bg-background-secondary"
+                >
+                  Chỉnh sửa lại
+                </button>
+                <button
+                  onClick={() => handlePrint('draft')}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-sm border border-brand-primary/40 text-brand-primary hover:bg-brand-light/10"
+                >
+                  <Printer className="w-3 h-3" />In nháp
+                </button>
+                <button
+                  onClick={() => handlePrint('official')}
+                  disabled={!canFinalize}
+                  className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-sm border transition-colors ${
+                    canFinalize
+                      ? 'border-semantic-success/40 text-semantic-success hover:bg-semantic-success/10'
+                      : 'border-border text-text-tertiary cursor-not-allowed'
+                  }`}
+                >
+                  <Printer className="w-3 h-3" />In chính thức
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => handlePreview('draft')}
+                className="text-xs px-3 py-1.5 rounded-sm border border-border text-text-secondary hover:bg-background-secondary flex items-center gap-1"
+              >
+                <Eye className="w-3 h-3" />Xem trước PDF
+              </button>
+            )}
+            <button
+              onClick={() => setApproved(true)}
+              disabled={!canFinalize}
+              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-sm font-semibold ${
+                canFinalize
+                  ? 'bg-semantic-success text-white hover:opacity-90'
+                  : 'bg-background-secondary text-text-tertiary border border-border cursor-not-allowed'
+              }`}
+            >
+              <Check className="w-3.5 h-3.5" />BS Xác nhận & Lưu
+            </button>
+          </div>
+        )}
+        {approved && (
+          <div className="shrink-0 border-t border-border px-3 py-2 flex items-center gap-2 bg-semantic-success/5">
+            <Check className="w-3.5 h-3.5 text-semantic-success" />
+            <p className="text-xs text-semantic-success font-medium">Báo cáo đã xác nhận · Audit trail ghi nhận</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1020,8 +1816,10 @@ function CaseDetail() {
   const step = (searchParams?.get('step') ?? 'detection') as Step;
   const setStep = (s: Step) => router.push(`/cases/${id}?step=${s}`);
 
+  const [rightMode, setRightMode] = useState<'workspace' | 'cae'>('workspace');
   const [panelMode, setPanelMode] = useState<PanelMode>('wide');
   const [manualMode, setManualMode] = useState(false);
+  const [imagePanelCollapsed, setImagePanelCollapsed] = useState(false);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
   const [openCitation, setOpenCitation] = useState<number | null>(null);
@@ -1029,7 +1827,10 @@ function CaseDetail() {
   const [isLoadingEpisode, setIsLoadingEpisode] = useState(true);
   const [episodeError, setEpisodeError] = useState<string | null>(null);
   const [caseInfo, setCaseInfo] = useState<CaseInfo>(DEFAULT_CASE_INFO);
-  const [liveCitations, setLiveCitations] = useState<Citation[]>(CITATIONS_DATA);
+  const [liveCitations, setLiveCitations] = useState<Citation[]>([]);
+  const [liveCitationAnchors, setLiveCitationAnchors] = useState<CitationAnchor[]>([]);
+  const [highlightedFieldKey, setHighlightedFieldKey] = useState<string | null>(null);
+  const focusRestoreTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch episode detail from API
   useEffect(() => {
@@ -1068,81 +1869,241 @@ function CaseDetail() {
   // In production: fetch from Supabase based on episode_id
   const sampleIdx = EPISODE_TO_SAMPLE[id] ?? 0;
   const sample = PCXR_SAMPLES[sampleIdx];
+  const findingIds = sample.annotations.map(annotation => String(annotation.id));
 
   // Auto-switch panel width on step change unless user overrode
-  useEffect(() => { if (!manualMode) setPanelMode(STEP_DEFAULT_MODE[step]); }, [step, manualMode]);
+  useEffect(() => {
+    if (!manualMode) setPanelMode(STEP_DEFAULT_MODE[step]);
+  }, [step, manualMode]);
+
+  // Auto-collapse image panel when entering draft; restore when leaving
+  useEffect(() => {
+    setImagePanelCollapsed(step === 'draft');
+  }, [step]);
+
+  useEffect(() => {
+    return () => {
+      if (focusRestoreTimeoutRef.current) {
+        clearTimeout(focusRestoreTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (step !== 'draft') {
+      setHighlightedFieldKey(null);
+    }
+  }, [step]);
+
+  const setFocusedFinding = (nextIndex: number | null, ttlMs?: number) => {
+    if (focusRestoreTimeoutRef.current) {
+      clearTimeout(focusRestoreTimeoutRef.current);
+      focusRestoreTimeoutRef.current = null;
+    }
+
+    setFocusedIdx(nextIndex);
+
+    if (nextIndex !== null && ttlMs && ttlMs > 0) {
+      focusRestoreTimeoutRef.current = setTimeout(() => {
+        setFocusedIdx(null);
+        focusRestoreTimeoutRef.current = null;
+      }, ttlMs);
+    }
+  };
 
   const handleSetStep = (s: Step) => { setManualMode(false); setStep(s); };
   const handleSetMode = (m: PanelMode) => { setManualMode(true); setPanelMode(m); };
 
-  return (
-    <div className="flex flex-col gap-3 h-full">
-      {/* Top bar */}
-      <div className="flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2">
-          <Link href="/" className="flex items-center gap-1 text-xs text-text-tertiary hover:text-text-primary transition-colors">
-            <ArrowLeft className="w-3.5 h-3.5" />Worklist
-          </Link>
-          <ChevronRight className="w-3 h-3 text-text-tertiary" />
-          <span className="text-xs font-semibold text-text-primary font-mono">{id}</span>
-          <span className="text-[10px] text-text-tertiary">· {caseInfo.age} · {caseInfo.date}</span>
-        </div>
+  const handleCAECitationClick = (citationId: string) => {
+    const citationNum = Number.parseInt(citationId, 10);
+    if (Number.isFinite(citationNum)) {
+      setOpenCitation(citationNum);
+    }
+    if (step !== 'explain') {
+      handleSetStep('explain');
+    }
+  };
 
-        <div className="flex items-center gap-2">
-          {/* Panel width presets */}
-          <div className="flex items-center gap-0.5 border border-border rounded-sm p-0.5 bg-background-secondary">
-            {([
-              { mode: 'wide'     as PanelMode, g: '▐▐▌', tip: 'Ảnh rộng (54%)' },
-              { mode: 'balanced' as PanelMode, g: '▐▌▌', tip: 'Cân bằng (44%)' },
-              { mode: 'compact'  as PanelMode, g: '▌▌▐', tip: 'Text rộng (30%)' },
-            ]).map(m => (
-              <button key={m.mode} onClick={() => handleSetMode(m.mode)} title={m.tip}
-                className={`px-2 py-1 rounded-sm text-[10px] font-mono tracking-widest transition-colors ${panelMode === m.mode ? 'bg-surface text-text-primary shadow-sm' : 'text-text-tertiary hover:text-text-secondary'}`}>
-                {m.g}
-              </button>
-            ))}
+  const handleCAEAction = (action: UIAction) => {
+    if (action.type === 'dock_state' && action.state === 'compose' && step !== 'draft') {
+      handleSetStep('draft');
+      setRightMode('workspace');
+      return;
+    }
+
+    if (action.type === 'highlight_field') {
+      setHighlightedFieldKey(action.fieldId);
+      if (step !== 'draft') {
+        handleSetStep('draft');
+      }
+      setRightMode('workspace');
+      return;
+    }
+
+    if (action.type === 'focus_finding') {
+      const resolvedFindingIndex = resolveFindingIndex(sample, action.findingId);
+      if (resolvedFindingIndex !== null) {
+        setFocusedFinding(resolvedFindingIndex, action.ttlMs ?? 5000);
+      }
+      return;
+    }
+
+    if (action.type === 'restore_view') {
+      setFocusedFinding(null);
+      return;
+    }
+
+    if (action.type === 'open_evidence') {
+      handleCAECitationClick(action.citationId);
+    }
+  };
+
+  if (isLoadingEpisode) {
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <LoadingSpinner label="Đang tải thông tin ca bệnh" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 h-full">
+      {/* Slim top bar: patient meta + layout presets. Back link is in SlimBar. */}
+      <div className="flex items-center gap-3 shrink-0 h-8">
+        <span className="text-xs text-text-tertiary">
+          {caseInfo.age !== '—' && <>{caseInfo.age} · {caseInfo.gender} · {caseInfo.date}</>}
+        </span>
+        <div className="flex items-center gap-1.5 ml-auto">
+          {!imagePanelCollapsed && (
+            <div className="flex items-center gap-0.5 border border-border rounded-sm p-0.5 bg-background-secondary">
+              {([
+                { mode: 'wide'      as PanelMode, g: '▐▐▌', tip: 'Ảnh rộng (54%)' },
+                { mode: 'balanced'  as PanelMode, g: '▐▌▌', tip: 'Cân bằng (44%)' },
+                { mode: 'compact'   as PanelMode, g: '▌▌▐', tip: 'Text rộng (30%)' },
+              ]).map(m => (
+                <button key={m.mode} onClick={() => handleSetMode(m.mode)} title={m.tip}
+                  className={`px-2 py-0.5 rounded-sm text-[10px] font-mono tracking-widest transition-colors ${panelMode === m.mode ? 'bg-surface text-text-primary shadow-sm' : 'text-text-tertiary hover:text-text-secondary'}`}>
+                  {m.g}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {episodeError && (
+        <div className="flex items-start gap-2 rounded-sm border border-semantic-warning/30 bg-semantic-warning/5 px-3 py-2 shrink-0">
+          <AlertTriangle className="w-4 h-4 text-semantic-warning shrink-0 mt-0.5" />
+          <p className="text-xs text-text-secondary leading-relaxed">{episodeError}</p>
+        </div>
+      )}
+
+      {/* Main workspace: X-ray | Tabbed right panel */}
+      <div className="flex gap-2 flex-1 min-h-0">
+        {imagePanelCollapsed ? (
+          <div className="shrink-0 w-10 flex flex-col border border-border rounded-sm bg-surface overflow-hidden">
+            <button
+              onClick={() => setImagePanelCollapsed(false)}
+              title="Hiện ảnh X-quang"
+              className="flex-1 flex flex-col items-center justify-center gap-2 text-text-tertiary hover:text-text-primary hover:bg-background-secondary transition-colors py-3"
+            >
+              <Maximize2 className="w-3.5 h-3.5 shrink-0" />
+              <span className="[writing-mode:vertical-rl] [text-orientation:mixed] text-[9px] font-medium uppercase tracking-wider select-none">X-quang</span>
+            </button>
           </div>
-          {/* Step tabs */}
-          <div className="flex items-center gap-0.5 border border-border rounded-sm p-0.5 bg-background-secondary">
+        ) : (
+          <ImagePanel
+            widthPct={PANEL_WIDTHS[panelMode]}
+            sample={sample}
+            caseInfo={caseInfo}
+            hoveredIdx={hoveredIdx}
+            onHoverIdx={setHoveredIdx}
+            focusedIdx={focusedIdx}
+            onFocusIdx={setFocusedFinding}
+            onFullscreen={() => setFullscreen(true)}
+            onCollapse={step === 'draft' ? () => setImagePanelCollapsed(true) : undefined}
+          />
+        )}
+
+        {/* Right: single flex-1 tabbed container */}
+        <div className="flex-1 min-w-0 flex flex-col min-h-0 border border-border rounded-sm overflow-hidden bg-surface">
+
+          {/* Tab bar */}
+          <div className="flex items-center gap-0.5 px-2 border-b border-border bg-background-secondary shrink-0 h-9">
             {STEPS.map((s, i) => {
-              const isActive = step === s.key;
-              const isDone = STEPS.findIndex(x => x.key === step) > i;
+              const isActive = step === s.key && rightMode === 'workspace';
+              const isDone = rightMode === 'workspace' && STEPS.findIndex(x => x.key === step) > i;
               const Icon = s.icon;
               return (
-                <button key={s.key} onClick={() => handleSetStep(s.key)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-xs font-medium transition-colors ${isActive ? 'bg-surface text-text-primary shadow-sm' : 'text-text-tertiary hover:text-text-secondary'}`}>
-                  {isDone ? <Check className="w-3.5 h-3.5 text-semantic-success" /> : <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-text-primary' : 'text-text-tertiary'}`} />}
+                <button
+                  key={s.key}
+                  onClick={() => { setRightMode('workspace'); handleSetStep(s.key); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-xs font-medium transition-colors ${
+                    isActive
+                      ? 'bg-surface text-text-primary shadow-sm'
+                      : 'text-text-tertiary hover:text-text-secondary hover:bg-background-tertiary'
+                  }`}
+                >
+                  {isDone
+                    ? <Check className="w-3 h-3 text-semantic-success" />
+                    : <Icon className={`w-3 h-3 ${isActive ? 'text-brand-primary' : 'text-text-tertiary'}`} />
+                  }
                   {s.label}
                 </button>
               );
             })}
-          </div>
-        </div>
-      </div>
 
-      {/* Two-panel workspace */}
-      <div className="flex gap-3 flex-1 min-h-0">
-        <ImagePanel
-          widthPct={PANEL_WIDTHS[panelMode]}
-          sample={sample}
-          caseInfo={caseInfo}
-          hoveredIdx={hoveredIdx}
-          onHoverIdx={setHoveredIdx}
-          focusedIdx={focusedIdx}
-          onFocusIdx={setFocusedIdx}
-          onFullscreen={() => setFullscreen(true)}
-        />
-        <div className="flex-1 min-w-0 flex flex-col gap-3 min-h-0">
-          <CAEDock
-            episodeId={id}
-            currentStep={step}
-            onActivityDetected={() => {
-              // User is interacting with dock, prevent auto-transitions
-            }}
-          />
-          {step === 'detection' && <DetectionPanel sample={sample} hoveredIdx={hoveredIdx} onHoverIdx={setHoveredIdx} focusedIdx={focusedIdx} onFocusIdx={setFocusedIdx} onNext={() => handleSetStep('explain')} />}
-          {step === 'explain'   && <ExplainPanel episodeId={id} sample={sample} onNext={() => handleSetStep('draft')} onCitation={setOpenCitation} onCitationsLoaded={setLiveCitations} />}
-          {step === 'draft'     && <DraftPanel episodeId={id} sample={sample} />}
+            <div className="flex-1" />
+
+            {/* CAE tab */}
+            <button
+              onClick={() => setRightMode(rightMode === 'cae' ? 'workspace' : 'cae')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-xs font-semibold transition-colors ${
+                rightMode === 'cae'
+                  ? 'bg-brand-light text-brand-primary border border-brand-primary/20'
+                  : 'text-text-tertiary hover:text-text-secondary hover:bg-background-tertiary'
+              }`}
+            >
+              <Brain className="w-3 h-3" />
+              CAE
+              {liveCitationAnchors.length > 0 && (
+                <span className="w-1.5 h-1.5 rounded-full bg-brand-primary animate-breathe" />
+              )}
+            </button>
+          </div>
+
+          {/* Workspace content — hidden (but mounted) when CAE tab active */}
+          <div className={`flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto p-3 ${rightMode === 'cae' ? 'hidden' : ''}`}>
+            {/* Panels are always mounted — CSS hidden to preserve state across tab switches */}
+            <div className={step !== 'detection' ? 'hidden' : 'flex flex-col flex-1 min-h-0'}>
+              <DetectionPanel sample={sample} hoveredIdx={hoveredIdx} onHoverIdx={setHoveredIdx} focusedIdx={focusedIdx} onFocusIdx={setFocusedFinding} onNext={() => handleSetStep('explain')} />
+            </div>
+            <div className={step !== 'explain' ? 'hidden' : 'flex flex-col flex-1 min-h-0'}>
+              <ExplainPanel episodeId={id} sample={sample} onNext={() => handleSetStep('draft')} onCitation={setOpenCitation} onCitationsLoaded={setLiveCitations} onStructuredCitationsLoaded={setLiveCitationAnchors} focusedIdx={focusedIdx} onFocusIdx={setFocusedFinding} />
+            </div>
+            <div className={step !== 'draft' ? 'hidden' : 'flex flex-col flex-1 min-h-0'}>
+              <DraftPanel episodeId={id} sample={sample} caseInfo={caseInfo} highlightedFieldKey={highlightedFieldKey} onCitation={setOpenCitation} onCitationsLoaded={setLiveCitations} onStructuredCitationsLoaded={setLiveCitationAnchors} />
+            </div>
+          </div>
+
+          {/* CAE panel — always mounted for state/stream preservation, shown when CAE tab active */}
+          <div className={`flex-1 min-h-0 overflow-hidden ${rightMode !== 'cae' ? 'hidden' : 'flex'}`}>
+            <CAEDock
+              fullWidth
+              episodeId={id}
+              currentStep={step}
+              findingIds={findingIds}
+              contextCitations={liveCitationAnchors}
+              onCitationClick={handleCAECitationClick}
+              onCitationsChange={(citations) => {
+                setLiveCitationAnchors(citations);
+                setLiveCitations(citations.map((citation, index) => mapStructuredCitation(citation, index)));
+              }}
+              onUIAction={handleCAEAction}
+              onActivityDetected={() => {}}
+            />
+          </div>
+
         </div>
       </div>
 

@@ -15,14 +15,14 @@ async function testMiMoClient() {
   // Test 1: Health check
   console.log('1️⃣ Health Check...');
   try {
-    const isHealthy = await client.healthCheck();
+    const isHealthy = await client.isAvailable();
     console.log(`   ✅ Health check: ${isHealthy ? 'PASS' : 'FAIL'}`);
   } catch (error) {
     console.error('   ❌ Health check failed:', (error as Error).message);
   }
 
   // Test 2: Simple chat
-  console.log('\n2️⃣ Simple Chat (MiMo-V2.5-Pro)...');
+  console.log('\n2️⃣ Simple Chat (mimo-v2.5-pro)...');
   try {
     const response = await client.chat([
       { role: 'system', content: 'You are a helpful medical AI assistant.' },
@@ -38,11 +38,11 @@ async function testMiMoClient() {
   }
 
   // Test 3: Fallback model
-  console.log('\n3️⃣ Fallback Model (MiMo-V2.5)...');
+  console.log('\n3️⃣ Fallback Model (mimo-v2.5)...');
   try {
     const response = await client.chat([
       { role: 'user', content: 'Hello, how are you?' },
-    ], { max_tokens: 50 }, 'MiMo-V2.5');
+    ], { max_tokens: 50 }, 'mimo-v2.5');
 
     console.log('   ✅ Fallback response:');
     console.log('   Model:', response.model);

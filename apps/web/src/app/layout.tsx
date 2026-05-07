@@ -1,11 +1,22 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import { Suspense } from 'react';
+import { DM_Sans, JetBrains_Mono } from 'next/font/google';
 import '../styles/globals.css';
 import { AppLayout } from '@/components/ui/app-layout';
 import { AuthProvider } from '@/contexts/auth-context';
 import { RouteLoader } from '@/components/ui/route-loader';
 
-const inter = Inter({ subsets: ['latin', 'vietnamese'] });
+const dmSans = DM_Sans({
+  subsets: ['latin', 'latin-ext'],
+  variable: '--font-dm-sans',
+  display: 'swap',
+});
+
+const jbMono = JetBrains_Mono({
+  subsets: ['latin'],
+  variable: '--font-jb-mono',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'WebRAG — Hệ thống RAG Y tế Nhi khoa',
@@ -18,9 +29,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="vi">
-      <body className={inter.className} suppressHydrationWarning>
-        <RouteLoader />
+    <html lang="vi" suppressHydrationWarning>
+      <body
+        className={`${dmSans.variable} ${jbMono.variable}`}
+        suppressHydrationWarning
+      >
+        <Suspense fallback={null}>
+          <RouteLoader />
+        </Suspense>
         <AuthProvider>
           <AppLayout>{children}</AppLayout>
         </AuthProvider>

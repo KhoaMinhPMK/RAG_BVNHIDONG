@@ -1,6 +1,6 @@
 import express from 'express';
-import { getOrSetCache, checkRedisHealth } from '../lib/cache/redis.js';
-import { rateLimit, RateLimitPresets } from '../middleware/rate-limit.js';
+import { getOrSetCache, checkRedisHealth } from './redis.js';
+import { rateLimit, RateLimitPresets } from '../../middleware/rate-limit.js';
 
 /**
  * Example usage of Redis caching and rate limiting

@@ -117,12 +117,14 @@ export class Chunker {
     // This handles control chars, surrogate pairs, and Unicode edge cases
     const normalizedContent = cleanText(content);
 
-    const { max_tokens, overlap_tokens, preserve_paragraphs, preserve_sentences } = this.options;
+    const { max_tokens, preserve_paragraphs, preserve_sentences } = this.options;
+    const overlap_tokens = this.getSafeOverlapTokens(max_tokens);
+    const contentMaxTokens = overlap_tokens > 0 ? max_tokens - overlap_tokens : max_tokens;
 
     // Strategy 1: Preserve paragraphs (best for structured documents)
     if (preserve_paragraphs) {
       const paragraphs = ParagraphSplitter.split(normalizedContent);
-      const chunks = ParagraphSplitter.groupByTokens(paragraphs, max_tokens, tokenizer);
+      const chunks = ParagraphSplitter.groupByTokens(paragraphs, contentMaxTokens, tokenizer);
 
       if (overlap_tokens > 0) {
         return this.addOverlap(chunks, overlap_tokens);
@@ -134,7 +136,7 @@ export class Chunker {
     // Strategy 2: Preserve sentences (good for flowing text)
     if (preserve_sentences) {
       const sentences = SentenceSplitter.split(normalizedContent);
-      const chunks = SentenceSplitter.groupByTokens(sentences, max_tokens, tokenizer);
+      const chunks = SentenceSplitter.groupByTokens(sentences, contentMaxTokens, tokenizer);
 
       if (overlap_tokens > 0) {
         return this.addOverlap(chunks, overlap_tokens);
@@ -145,6 +147,15 @@ export class Chunker {
 
     // Strategy 3: Simple token-based splitting (fallback)
     return tokenizer.splitByTokens(normalizedContent, max_tokens, overlap_tokens);
+  }
+
+  /**
+   * Reserve token budget for overlap so prepending context doesn't push
+   * the final chunk beyond the configured max token size.
+   */
+  private getSafeOverlapTokens(maxTokens: number): number {
+    const requestedOverlap = Math.max(0, this.options.overlap_tokens);
+    return Math.min(requestedOverlap, Math.max(maxTokens - 1, 0));
   }
 
   /**

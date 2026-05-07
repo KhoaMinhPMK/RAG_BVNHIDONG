@@ -184,9 +184,9 @@ export function Header() {
         </div>
         <div className="flex items-center gap-1.5">
           <Cpu className="w-3 h-3 text-text-tertiary" />
-          <StatusDot ok={true} label="Ollama" />
+          <StatusDot ok={true} label="CAE" />
           <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-background-tertiary text-text-tertiary border border-border font-mono">
-            qwen2.5:7b
+            MiMo token-plan
           </span>
         </div>
       </div>

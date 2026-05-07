@@ -8,6 +8,7 @@ import { useAuth } from '@/contexts/auth-context';
 interface SidebarProps {
   collapsed: boolean;
   onToggle: () => void;
+  forceCollapsed?: boolean;
 }
 
 const navItems = [
@@ -39,10 +40,11 @@ const navItems = [
 
 const systemInfo = [
   { label: 'Supabase', status: 'ok', detail: 'pgvector · connected' },
-  { label: 'Ollama', status: 'ok', detail: 'qwen2.5:7b · ~54 tok/s' },
+  { label: 'CAE', status: 'ok', detail: 'MiMo token-plan · ready' },
+  { label: 'Ollama', status: 'ok', detail: 'local fallback · qwen2.5:7b' },
 ];
 
-export function Sidebar({ collapsed, onToggle }: SidebarProps) {
+export function Sidebar({ collapsed, onToggle, forceCollapsed = false }: SidebarProps) {
   const pathname = usePathname();
   const { role, loading } = useAuth();
 
@@ -120,22 +122,24 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         </ul>
       </nav>
 
-      {/* Collapse toggle */}
-      <div className="border-t border-border px-1.5 py-1.5">
-        <button
-          onClick={onToggle}
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-xs text-text-secondary hover:bg-background-secondary transition-colors"
-          title={collapsed ? 'Mở rộng sidebar' : 'Thu gọn sidebar'}
-        >
-          {collapsed
-            ? <ChevronRight className="w-3.5 h-3.5 mx-auto" />
-            : <>
-                <span className="text-[10px] font-medium flex-1 text-left">Thu gọn</span>
-                <ChevronLeft className="w-3.5 h-3.5 shrink-0" />
-              </>
-          }
-        </button>
-      </div>
+      {/* Collapse toggle — hidden when sidebar is force-collapsed by route */}
+      {!forceCollapsed && (
+        <div className="border-t border-border px-1.5 py-1.5">
+          <button
+            onClick={onToggle}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-xs text-text-secondary hover:bg-background-secondary transition-colors"
+            title={collapsed ? 'Mở rộng sidebar' : 'Thu gọn sidebar'}
+          >
+            {collapsed
+              ? <ChevronRight className="w-3.5 h-3.5 mx-auto" />
+              : <>
+                  <span className="text-[10px] font-medium flex-1 text-left">Thu gọn</span>
+                  <ChevronLeft className="w-3.5 h-3.5 shrink-0" />
+                </>
+            }
+          </button>
+        </div>
+      )}
 
       {/* System status */}
       <div className={`border-t border-border ${collapsed ? 'p-1.5' : 'p-3'}`}>
@@ -160,8 +164,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         ) : (
           <div className="flex flex-col items-center gap-1.5">
             {systemInfo.map((s) => (
-              <Circle key={s.label} title={`${s.label}: ${s.detail}`}
-                className={`w-1.5 h-1.5 fill-current ${s.status === 'ok' ? 'text-semantic-success' : 'text-semantic-error'}`} />
+              <div key={s.label} title={`${s.label}: ${s.detail}`} aria-label={`${s.label}: ${s.detail}`}>
+                <Circle className={`w-1.5 h-1.5 fill-current ${s.status === 'ok' ? 'text-semantic-success' : 'text-semantic-error'}`} />
+              </div>
             ))}
           </div>
         )}

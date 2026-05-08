@@ -878,7 +878,7 @@ function ExplainPanel({
     async function tryRestore() {
       setIsRestoring(true);
       try {
-        const run = await getLatestAiRun(episodeId, 'explain', 480);
+        const run = await getLatestAiRun(episodeId, 'explain', 10080);
         if (!cancelled && run && (run.blocks as RenderableBlock[]).length > 0) {
           setRestoredBlocks(run.blocks as RenderableBlock[]);
           setRestoredCitations((run.citations ?? []) as CitationAnchor[]);
@@ -2097,6 +2097,8 @@ function CaseDetail() {
                 <span className="w-1.5 h-1.5 rounded-full bg-brand-primary animate-breathe" />
               )}
             </button>
+
+
           </div>
 
           {/* Workspace content — hidden (but mounted) when CAE tab active */}
@@ -2130,6 +2132,8 @@ function CaseDetail() {
               onActivityDetected={() => {}}
             />
           </div>
+
+
 
         </div>
       </div>

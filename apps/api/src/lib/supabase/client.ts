@@ -133,6 +133,72 @@ export interface Database {
         Insert: Database['public']['Tables']['audit_logs']['Row'];
         Update: Partial<Database['public']['Tables']['audit_logs']['Insert']>;
       };
+      chat_sessions: {
+        Row: {
+          id: string;
+          user_id: string;
+          episode_id: string | null;
+          title: string;
+          status: 'active' | 'archived';
+          forked_from_id: string | null;
+          forked_at_idx: number | null;
+          context_summary: string | null;
+          token_count: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['chat_sessions']['Row'], 'created_at' | 'updated_at' | 'token_count'> & { token_count?: number };
+        Update: Partial<Omit<Database['public']['Tables']['chat_sessions']['Row'], 'id' | 'created_at'>>;
+      };
+      chat_messages: {
+        Row: {
+          id: string;
+          session_id: string;
+          idx: number;
+          role: 'user' | 'assistant' | 'system';
+          content: string;
+          citations: any[] | null;
+          retrieved_chunks: any[] | null;
+          model_id: string | null;
+          policy_version: string | null;
+          latency_ms: number | null;
+          token_count: number;
+          is_summarized: boolean;
+          feedback: -1 | 0 | 1 | null;
+          feedback_note: string | null;
+          created_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['chat_messages']['Row'], 'created_at' | 'token_count' | 'is_summarized'> & { token_count?: number; is_summarized?: boolean };
+        Update: Partial<Omit<Database['public']['Tables']['chat_messages']['Row'], 'id' | 'session_id' | 'idx' | 'created_at'>>;
+      };
+      report_versions: {
+        Row: {
+          id: string;
+          draft_id: string;
+          version: number;
+          blocks: any[];
+          citation_snapshot: any[];
+          model_id: string | null;
+          policy_version: string | null;
+          action: 'ai_generated' | 'user_edited' | 'submitted_for_review' | 'approved' | 'rejected' | 'superseded' | 'forked';
+          action_by: string | null;
+          action_note: string | null;
+          session_id: string | null;
+          created_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['report_versions']['Row'], 'id' | 'created_at'>;
+        Update: never;
+      };
+      report_locks: {
+        Row: {
+          draft_id: string;
+          locked_by: string;
+          locked_at: string;
+          expires_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['report_locks']['Row'], 'locked_at'>;
+        Update: Partial<Omit<Database['public']['Tables']['report_locks']['Row'], 'draft_id'>>;
+      };
     };
   };
 }

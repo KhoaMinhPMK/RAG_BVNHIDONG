@@ -68,6 +68,22 @@ const permissions: RBACPermissions = {
     allowedRoles: ['clinician', 'radiologist', 'admin'],
     description: 'Update episode status and data',
   },
+  'sessions:read': {
+    allowedRoles: ['clinician', 'radiologist', 'researcher', 'admin'],
+    description: 'Read own chat sessions',
+  },
+  'sessions:write': {
+    allowedRoles: ['clinician', 'radiologist', 'researcher', 'admin'],
+    description: 'Create and update chat sessions',
+  },
+  'reports:version': {
+    allowedRoles: ['clinician', 'radiologist', 'researcher'],
+    description: 'Create new report versions',
+  },
+  'reports:approve': {
+    allowedRoles: ['clinician', 'radiologist'],
+    description: 'Approve or reject submitted reports',
+  },
 };
 
 /**

@@ -435,7 +435,7 @@ export function CAEDock({
     getLatestAiRun(episodeId, 'brief', 480).then((row) => {
       if (cancelled) return;
       setIsRestoringFromDb(false);
-      if (row) {
+      if (row && (row.blocks as RenderableBlock[])?.length > 0) {
         const snap = runRowToSnapshot(row);
         if (snap) {
           setRunSnapshots([snap]);

@@ -639,11 +639,8 @@ export interface DraftReportRow {
   fields: Array<{ field_id: string; label?: string; value: unknown; source?: string; status?: string; provenance?: unknown[] }>;
   status: 'draft' | 'under_review' | 'edited' | 'approved' | 'rejected' | 'archived';
   model_version: string | null;
-  run_id: string | null;
   approved_by: string | null;
-  approved_at: string | null;
-  approval_note: string | null;
-  signature_data: unknown | null;
+  created_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -675,3 +672,35 @@ export function invalidateDraftCache(episodeId: string) {
   invalidateCache(`draft_${episodeId}`);
 }
 
+export interface DraftListItem {
+  draft_id: string;
+  episode_id: string;
+  template_id: string | null;
+  status: 'draft' | 'under_review' | 'edited' | 'approved' | 'rejected' | 'archived';
+  model_version: string | null;
+  created_by: string | null;
+  approved_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listDrafts(params?: {
+  status?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ drafts: DraftListItem[]; total: number }> {
+  const q = new URLSearchParams();
+  if (params?.status) q.set('status', params.status);
+  if (params?.limit)  q.set('limit', String(params.limit));
+  if (params?.offset) q.set('offset', String(params.offset));
+
+  try {
+    const result = await apiCall<{ drafts: DraftListItem[]; total: number }>(
+      `/api/ai-runs/drafts?${q.toString()}`,
+      { method: 'GET' }
+    );
+    return result ?? { drafts: [], total: 0 };
+  } catch {
+    return { drafts: [], total: 0 };
+  }
+}

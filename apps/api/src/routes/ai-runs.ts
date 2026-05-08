@@ -6,6 +6,8 @@
  * GET  /api/ai-runs/:run_id                   – single run by ID
  * POST /api/ai-runs/:run_id/abort             – mark a streaming run aborted (client disconnect)
  *
+ * GET  /api/drafts                            – list all drafts (paginated)
+ * GET  /api/drafts/latest?episode_id=         – latest draft for episode
  * GET  /api/drafts/:draft_id                  – get draft with signature info
  * POST /api/drafts/:draft_id/approve          – approve draft + e-signature
  */
@@ -81,6 +83,34 @@ router.post('/:run_id/abort', authenticateJWT, async (req: Request, res: Respons
   return res.json({ success: true });
 });
 
+// ── GET /api/drafts?status=&limit=&offset= ────────────────────────────────
+// List all drafts across episodes (for the reports page)
+router.get('/drafts', authenticateJWT, async (req: Request, res: Response) => {
+  const { status, limit = '50', offset = '0' } = req.query as Record<string, string>;
+
+  let query = supabase
+    .from('draft_reports')
+    .select(`
+      draft_id, episode_id, template_id, status, model_version,
+      created_by, approved_by, created_at, updated_at
+    `, { count: 'exact' })
+    .order('updated_at', { ascending: false })
+    .range(Number(offset), Number(offset) + Number(limit) - 1);
+
+  if (status) {
+    query = query.eq('status', status);
+  }
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    logger.warn('[drafts] list query error', { error: error.message });
+    return res.status(500).json({ success: false, error: error.message });
+  }
+
+  return res.json({ success: true, drafts: data ?? [], total: count ?? 0 });
+});
+
 // ── GET /api/drafts/latest?episode_id= ────────────────────────────────────
 
 router.get('/drafts/latest', authenticateJWT, async (req: Request, res: Response) => {
@@ -90,12 +120,11 @@ router.get('/drafts/latest', authenticateJWT, async (req: Request, res: Response
     return res.status(400).json({ success: false, error: 'episode_id required' });
   }
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('draft_reports')
     .select(`
       draft_id, episode_id, template_id, fields, status, model_version,
-      run_id, approved_by, approved_at, approval_note, signature_data,
-      created_at, updated_at
+      created_by, approved_by, created_at, updated_at
     `)
     .eq('episode_id', episode_id)
     .in('status', ['draft', 'under_review', 'edited', 'approved'])
@@ -103,6 +132,9 @@ router.get('/drafts/latest', authenticateJWT, async (req: Request, res: Response
     .limit(1)
     .single();
 
+  if (error && error.code !== 'PGRST116') {
+    logger.warn('[drafts/latest] query error', { error: error.message });
+  }
   return res.json({ success: true, draft: data ?? null });
 });
 
@@ -115,8 +147,7 @@ router.get('/drafts/:draft_id', authenticateJWT, async (req: Request, res: Respo
     .from('draft_reports')
     .select(`
       draft_id, episode_id, template_id, fields, status, model_version,
-      run_id, created_by, approved_by, approved_at, approval_note, signature_data,
-      created_at, updated_at
+      created_by, approved_by, created_at, updated_at
     `)
     .eq('draft_id', draft_id)
     .single();

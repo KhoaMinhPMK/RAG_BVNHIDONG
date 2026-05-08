@@ -1,6 +1,6 @@
 'use client';
 
-import { LayoutList, BookOpen, Settings, Circle, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
+import { LayoutList, BookOpen, Settings, Circle, Plus, ChevronLeft, ChevronRight, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
@@ -19,6 +19,14 @@ const navItems = [
     icon: LayoutList,
     exact: true,
     roles: ['clinician', 'radiologist', 'researcher', 'admin'], // All authenticated users
+  },
+  {
+    label: 'Báo cáo',
+    description: 'Danh sách draft reports',
+    href: '/reports',
+    icon: FileText,
+    exact: false,
+    roles: ['clinician', 'radiologist', 'researcher', 'admin'],
   },
   {
     label: 'Kho Tri thức',

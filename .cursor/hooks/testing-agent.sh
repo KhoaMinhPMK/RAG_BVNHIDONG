@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-# Hook: testing-agent
+# Hook: subagentStart (đổi tên file giữ hooks.json)
 # Event: subagentStart
-# Mục đích: Khi một subagent được khởi chạy để làm việc liên quan đến testing,
-# tự động inject context chuyên sâu về Vitest, test patterns, và quy ước test
-# của dự án RAG y tế nhi khoa. Giúp AI viết test đúng chuẩn ngay từ đầu.
+# Mục đích: (1) Luôn inject tiêu chuẩn chất lượng WebRAG cho mọi subagent.
+# (2) Nếu task liên quan testing → thêm context Vitest/RTL/patterns dự án.
 
 import sys
 import json
@@ -14,6 +13,19 @@ def load_input():
         return json.load(sys.stdin)
     except Exception:
         return {}
+
+UNIVERSAL_SUBAGENT_CONTEXT = """## Subagent — Tiêu chuẩn WebRAG (luôn áp dụng)
+
+Bạn là subagent trong monorepo **WebRAG y tế nhi**. Áp dụng **mọi** task:
+
+1. **Đọc trước, sửa sau** — tìm pattern/file hiện có trước khi thêm abstraction mới.
+2. **Chuẩn kỹ thuật** — validate bằng Zod từ `@webrag/shared`; RBAC qua `requirePermission()`; không hardcode role trong handler; audit các thao tác nhạy cảm.
+3. **UI / copy** — tiếng Việt; `next-intl` cho chuỗi hiển thị cho user.
+4. **Phạm vi** — diff nhỏ, đúng yêu cầu; không refactor không liên quan.
+5. **Báo cáo** — kết quả có cấu trúc; lệnh shell ghi cwd / exit code khi hữu ích.
+
+Hook **subagentStop** có thể gửi `followup_message` checklist cho agent cha — giữ output nhất quán với checklist (nếu mâu thuẫn yêu cầu thì nêu trade-off rõ ràng).
+"""
 
 TESTING_KEYWORDS = [
     r'\btest\b', r'\btests?\b', r'\btesting\b',
@@ -161,24 +173,11 @@ def is_testing_task(data: dict) -> bool:
 
 def main():
     data = load_input()
-    subagent_type = data.get("subagent_type", "") or data.get("type", "")
-
-    # Chỉ inject cho các subagent types phù hợp
-    relevant_types = {"generalPurpose", "explore", "shell", ""}
-    if subagent_type and subagent_type not in relevant_types:
-        print(json.dumps({"permission": "allow"}))
-        return
-
-    if not is_testing_task(data):
-        # Không phải testing task → cho qua bình thường
-        print(json.dumps({"permission": "allow"}))
-        return
-
-    # Inject testing context
-    print(json.dumps({
-        "permission": "allow",
-        "user_message": TESTING_CONTEXT
-    }))
+    parts = [UNIVERSAL_SUBAGENT_CONTEXT]
+    if is_testing_task(data):
+        parts.append(TESTING_CONTEXT)
+    user_message = "\n\n".join(parts)
+    print(json.dumps({"permission": "allow", "user_message": user_message}))
 
 if __name__ == "__main__":
     main()

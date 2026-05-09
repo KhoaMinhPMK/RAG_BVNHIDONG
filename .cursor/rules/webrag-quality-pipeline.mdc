@@ -1,0 +1,27 @@
+---
+description: Quy trình chất lượng — hooks Cursor + Task/subagent cho WebRAG
+alwaysApply: true
+---
+
+# WebRAG — chất lượng qua hooks và subagent
+
+## Hooks (tự chạy, không cần nhắc)
+
+Cấu hình tại `.cursor/hooks.json`. Mỗi lượt làm việc có thể kích hoạt: `sessionStart`, `beforeSubmitPrompt`, `beforeShellExecution`, `preToolUse`, `afterFileEdit`, `beforeMCPExecution`, `subagentStart`, `subagentStop`. Tuân thủ **DENY/ASK** từ hook; đọc `additional_context` / `user_message` / `followup_message` được inject.
+
+## Subagent — khi nào nên dùng Task
+
+- **explore** — đọc/nắm codebase trước khi sửa nhiều file hoặc kiến trúc chưa rõ.
+- **shell** — chuỗi lệnh terminal, CI, git, build có kiểm soát.
+- **generalPurpose** — nhiều bước độc lập, tổng hợp kết quả.
+- **deployment-expert**, **ai-architect**, **performance-optimizer**, **ci-investigator** — khi đúng bối cảnh (deploy, AI stack, perf, PR checks).
+
+Không bắt buộc mọi câu hỏi đều spawn subagent; với thay đổi nhỏ (một file, một hàm) có thể làm trực tiếp vẫn đủ.
+
+## Sau subagent
+
+Nếu hook `subagentStop` trả **followup_message** (checklist flow/UI/lỗi tiếng Việt/design/security), agent cha **xử lý hoặc giải thích** lý do bỏ qua từng mục — không im lặng bỏ qua.
+
+## Kết thúc thay đổi code
+
+Chạy typecheck/lint trong phạm vi thay đổi khi khả thi; giữ diff tối thiểu theo yêu cầu.

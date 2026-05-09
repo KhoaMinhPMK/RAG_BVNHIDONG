@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # Hook: flow-quality-check
 # Event: subagentStop
-# Mục đích: Sau khi một subagent hoàn thành task liên quan đến code,
-# tự động gửi followup_message yêu cầu AI kiểm tra:
+# Mục đích: Sau khi subagent hoàn thành (mọi loại type), nếu task giống code/UI
+# thì gửi followup_message yêu cầu AI kiểm tra:
 # - User flow completeness (toàn bộ status pipeline)
 # - Code comment chất lượng (tiếng Việt, đúng nghiệp vụ)
 # - User-facing error messages
@@ -25,6 +25,8 @@ CODING_KEYWORDS = [
     r'\bthêm\b', r'\bsửa\b', r'\btạo\b', r'\bcập\s*nhật\b',
     r'\bapi\b', r'\bhook\b', r'\bcontext\b', r'\bservice\b',
     r'\bform\b', r'\bmodal\b', r'\bdialog\b', r'\btable\b',
+    r'\bdeploy\b', r'\bmigration\b', r'\bschema\b', r'\bperformance\b',
+    r'\btypecheck\b', r'\bbuild\b', r'\bci\b',
 ]
 
 # Keywords chỉ ra task KHÔNG cần flow review (read-only, exploration)
@@ -109,14 +111,6 @@ def should_run_review(data: dict) -> bool:
 
 def main():
     data = load_input()
-    subagent_type = data.get("subagent_type", "") or data.get("type", "")
-
-    # Chỉ review cho coding-relevant subagent types
-    coding_types = {"generalPurpose", "shell", ""}
-    if subagent_type and subagent_type not in coding_types:
-        # Không gửi followup cho explore/browser agents
-        print(json.dumps({}))
-        return
 
     if not should_run_review(data):
         print(json.dumps({}))

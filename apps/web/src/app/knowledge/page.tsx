@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import Link from 'next/link';
 import {
   Upload, BookOpen, Check, Clock, AlertTriangle, Search, Loader2,
   FileText, Layers, Database, Inbox, Wifi, WifiOff, X, Trash2,
@@ -27,7 +28,7 @@ interface SystemHealth {
     supabase: { status: string };
     cae: { status: string; provider?: string; model?: string };
     ollama: { status: string; model: string };
-    mimo: { status: string; model: string };
+    mimo: { status: string; model: string; detail?: string };
     embedding: { status: string; model: string; dim: number };
   };
 }
@@ -66,20 +67,23 @@ function cleanSource(raw: string): string {
 // ─── Service Status Pill ────────────────────────────────────────────────────
 
 function ServicePill({
-  label, status, model, dim,
-}: { label: string; status: string; model?: string; dim?: number }) {
+  label, status, model, dim, detail,
+}: { label: string; status: string; model?: string; dim?: number; detail?: string }) {
   const ok = status === 'connected' || status === 'ready';
   const degraded = status === 'degraded';
   return (
-    <div className={`flex items-center gap-1.5 px-2 py-1 rounded-sm border text-[10px] font-medium
+    <div
+      title={detail || undefined}
+      className={`flex items-center gap-1.5 px-2 py-1 rounded-sm border text-[10px] font-medium max-w-[220px]
       ${ok
         ? 'bg-semantic-success/10 border-semantic-success/30 text-semantic-success'
         : degraded
           ? 'bg-semantic-warning/10 border-semantic-warning/30 text-semantic-warning'
-          : 'bg-semantic-error/10 border-semantic-error/30 text-semantic-error'}`}>
-      {ok ? <Wifi className="w-3 h-3" /> : degraded ? <AlertTriangle className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-      <span>{label}</span>
-      {model && <span className="opacity-60 font-mono">· {model}{dim ? ` · ${dim}d` : ''}</span>}
+          : 'bg-semantic-error/10 border-semantic-error/30 text-semantic-error'}`}
+    >
+      {ok ? <Wifi className="w-3 h-3 shrink-0" /> : degraded ? <AlertTriangle className="w-3 h-3 shrink-0" /> : <WifiOff className="w-3 h-3 shrink-0" />}
+      <span className="truncate">{label}</span>
+      {model ? <span className="opacity-60 font-mono shrink-0">· {model}{dim ? ` · ${dim}d` : ''}</span> : null}
     </div>
   );
 }
@@ -443,22 +447,31 @@ export default function KnowledgePage() {
 
   const stats = [
     {
-      label: 'Tài liệu', value: loading ? '—' : String(total),
+      label: 'Tài liệu',
+      value: loading ? '—' : String(total),
+      title: 'Số bản ghi trong CSDL sau khi ingest (mỗi PDF thành công = 1 tài liệu; PDF trùng nội dung có thể bị bỏ qua).',
       sub: loading ? '' : `${activeDocs.length} active · ${total - activeDocs.length} pending`,
       icon: FileText, accent: 'text-brand-primary', accentBg: 'bg-brand-light',
     },
     {
-      label: 'Chunks', value: loading ? '—' : String(totalChunks),
+      label: 'Chunks',
+      value: loading ? '—' : String(totalChunks),
+      title: 'Tổng số đoạn văn bản đã tách; mỗi chunk có một vector embedding trong pgvector.',
       sub: 'pgvector · 768-dim',
       icon: Layers, accent: 'text-semantic-info', accentBg: 'bg-semantic-info/10',
     },
     {
-      label: 'Nguồn', value: loading ? '—' : String(uniqueSources.length),
+      label: 'Nguồn (khác nhau)',
+      value: loading ? '—' : String(uniqueSources.length),
+      title:
+        'Số giá trị khác nhau của cột «source» (WHO, Other, …). Nhỏ hơn số tài liệu nếu nhiều tài liệu cùng một nguồn — không phải số lần chạy embedding.',
       sub: loading ? '' : uniqueSources.map((s) => cleanSource(s!)).join(', ') || '—',
       icon: Database, accent: 'text-semantic-warning', accentBg: 'bg-semantic-warning/10',
     },
     {
-      label: 'Queue', value: '0',
+      label: 'Queue',
+      value: '0',
+      title: 'Hàng đợi ingest trên server (chưa nối với job store toàn cục).',
       sub: 'Không có job đang chờ',
       icon: Inbox, accent: 'text-text-tertiary', accentBg: 'bg-background-tertiary',
     },
@@ -482,7 +495,9 @@ export default function KnowledgePage() {
             <div className="flex-1 min-w-0">
               <h1 className="text-sm font-semibold text-text-primary">Kho tri thức</h1>
               <p className="text-[11px] text-text-tertiary mt-0.5">
-                {loading ? 'Đang tải…' : `${total} tài liệu · ${totalChunks} chunks · ${uniqueSources.length} nguồn`}
+                {loading
+                  ? 'Đang tải…'
+                  : `${total} tài liệu (bản ghi DB) · ${totalChunks} chunks (embedding) · ${uniqueSources.length} loại nguồn (source khác nhau)`}
               </p>
             </div>
             {/* Search */}
@@ -520,7 +535,12 @@ export default function KnowledgePage() {
               <ServicePill label="DB"        status={health.services.supabase.status} />
               <ServicePill label="CAE"       status={health.services.cae?.status || 'disconnected'} model={[health.services.cae?.provider, health.services.cae?.model].filter(Boolean).join(' · ')} />
               <ServicePill label="Ollama"    status={health.services.ollama.status}   model={health.services.ollama.model} />
-              <ServicePill label="MiMo"      status={health.services.mimo?.status || 'disconnected'} model={health.services.mimo?.model} />
+              <ServicePill
+                label="MiMo"
+                status={health.services.mimo?.status || 'disconnected'}
+                model={health.services.mimo?.model}
+                detail={health.services.mimo?.detail}
+              />
               <ServicePill label="Embedding" status={health.services.embedding.status} model={health.services.embedding.model} dim={health.services.embedding.dim} />
             </div>
           )}
@@ -531,7 +551,7 @@ export default function KnowledgePage() {
           {stats.map((s) => {
             const Icon = s.icon;
             return (
-              <div key={s.label} className="border border-border rounded-sm bg-surface px-4 py-3 flex items-start gap-3">
+              <div key={s.label} title={s.title} className="border border-border rounded-sm bg-surface px-4 py-3 flex items-start gap-3">
                 <div className={`w-8 h-8 rounded-sm flex items-center justify-center shrink-0 ${s.accentBg}`}>
                   <Icon className={`w-4 h-4 ${s.accent}`} />
                 </div>
@@ -601,6 +621,7 @@ export default function KnowledgePage() {
               const dateStr = (doc.effective_date ?? doc.created_at)?.slice(0, 10) ?? '—';
               const sourceClean = doc.source ? cleanSource(doc.source) : '—';
               const isDeleting = deletingId === doc.id;
+              const viewHref = `/knowledge/${encodeURIComponent(doc.id)}/view?title=${encodeURIComponent(doc.title)}`;
               return (
                 <div
                   key={doc.id}
@@ -608,9 +629,19 @@ export default function KnowledgePage() {
                     ${isDeleting ? 'opacity-40' : 'hover:bg-background-secondary'}`}
                 >
                   <div className="min-w-0">
-                    <p className="text-xs font-medium text-text-primary truncate group-hover:text-brand-primary transition-colors">
+                    <Link
+                      href={viewHref}
+                      prefetch={false}
+                      title="Xem PDF trong ứng dụng"
+                      aria-label={`Xem PDF: ${doc.title}`}
+                      onClick={(e) => {
+                        if (isDeleting) e.preventDefault();
+                      }}
+                      className={`text-left block w-full text-xs font-medium text-text-primary truncate group-hover:text-brand-primary transition-colors
+                        hover:underline underline-offset-2 ${isDeleting ? 'pointer-events-none opacity-50' : ''}`}
+                    >
                       {doc.title}
-                    </p>
+                    </Link>
                   </div>
                   <div className="min-w-0">
                     <span className={`inline-flex items-center px-1.5 py-0.5 rounded-sm border text-[10px] font-medium ${doc.source === 'Internal' ? 'bg-semantic-warning/10 border-semantic-warning/30 text-semantic-warning' : 'bg-semantic-info/10 border-semantic-info/30 text-semantic-info'}`}>
@@ -631,7 +662,11 @@ export default function KnowledgePage() {
                   </div>
                   {/* Delete */}
                   <button
-                    onClick={() => handleDelete(doc.id, doc.title)}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleDelete(doc.id, doc.title);
+                    }}
                     disabled={isDeleting}
                     className="flex items-center justify-center w-7 h-7 rounded-sm text-text-tertiary hover:text-semantic-error hover:bg-semantic-error/10 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-40"
                     title="Xóa tài liệu"

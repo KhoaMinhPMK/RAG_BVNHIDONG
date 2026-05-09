@@ -7,12 +7,17 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
+import { createReadStream } from 'fs';
 import { supabase } from '../lib/supabase/client.js';
 import { authenticateJWT } from '../middleware/auth.js';
 import { logger } from '../lib/utils/logger.js';
 import { ingestionService } from '../lib/ingestion/service.js';
 import { ingestionJobStore } from '../lib/ingestion/job-store.js';
 import type { IngestionProgressUpdate } from '../lib/ingestion/types.js';
+import {
+  getStoragePdfLocationFromMetadata,
+  removeKnowledgeSourcePdfFromStorage,
+} from '../lib/supabase/knowledge-pdf-storage.js';
 
 const router = Router();
 const KNOWLEDGE_ARTIFACT_DIR = path.resolve('knowledge_base', 'uploads');
@@ -74,6 +79,90 @@ async function persistUploadedArtifact(tempPath: string, originalName: string): 
 
   await fs.rename(tempPath, artifactPath);
   return artifactPath;
+}
+
+/** Roots on disk where served PDFs may live (path traversal guard). */
+const SOURCE_PDF_ROOTS = [
+  path.resolve(KNOWLEDGE_ARTIFACT_DIR),
+  path.resolve(UPLOAD_DIR),
+  path.resolve('knowledge_base'),
+  /** `apps/knowledge_base` when cwd is `apps/api` */
+  path.resolve('..', 'knowledge_base'),
+  /** Repo root `…/RAG_…/knowledge_base` when cwd is `apps/api` */
+  path.resolve('..', '..', 'knowledge_base'),
+];
+
+const KB_MARKER = 'knowledge_base/';
+
+/**
+ * DB may store absolute paths from another machine (e.g. …\\knowledge_base\\downloads\\x.pdf).
+ * Return candidate absolute paths under each local `knowledge_base/` root (api cwd and repo root).
+ */
+function remapLegacyKnowledgeBaseCandidates(rawPath: string): string[] {
+  const trimmed = rawPath.trim();
+  if (!trimmed) return [];
+  const unified = trimmed.replace(/\\/g, '/');
+  const lower = unified.toLowerCase();
+  const idx = lower.lastIndexOf(KB_MARKER);
+  if (idx === -1) {
+    return [];
+  }
+  const rel = unified.slice(idx + KB_MARKER.length).replace(/^\/+/, '');
+  if (!rel.toLowerCase().endsWith('.pdf')) {
+    return [];
+  }
+  const cwd = process.cwd();
+  const bases = [
+    path.join(cwd, 'knowledge_base'),
+    path.join(cwd, '..', 'knowledge_base'),
+    path.join(cwd, '..', '..', 'knowledge_base'),
+  ];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const base of bases) {
+    const abs = path.resolve(base, rel);
+    if (!seen.has(abs)) {
+      seen.add(abs);
+      out.push(abs);
+    }
+  }
+  return out;
+}
+
+function uniqueResolvedPaths(paths: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of paths) {
+    const n = path.resolve(p);
+    if (!seen.has(n)) {
+      seen.add(n);
+      out.push(n);
+    }
+  }
+  return out;
+}
+
+/**
+ * Resolve an on-disk PDF path for streaming only if it lies under an allowed root.
+ */
+function resolveAllowedSourcePdf(
+  artifactPath: string,
+  originalName?: string
+): { abs: string; downloadName: string } | null {
+  const abs = path.resolve(artifactPath);
+  if (!abs.toLowerCase().endsWith('.pdf')) {
+    return null;
+  }
+  const allowed = SOURCE_PDF_ROOTS.some((root) => {
+    const r = path.resolve(root);
+    return abs === r || abs.startsWith(`${r}${path.sep}`);
+  });
+  if (!allowed) {
+    return null;
+  }
+  const hint = originalName?.trim() ? sanitizeArtifactName(originalName.trim()) : '';
+  const downloadName = (hint || path.basename(abs)).replace(/[^\w.\- ()\[\]]+/g, '_').slice(0, 200) || 'document.pdf';
+  return { abs, downloadName };
 }
 
 function getDocumentSourceArtifact(document: {
@@ -251,6 +340,184 @@ router.get('/', authenticateJWT, async (req, res) => {
 });
 
 /**
+ * GET /api/documents/:id/source
+ * Stream the original PDF for preview (same RBAC as listing documents).
+ */
+router.get('/:id/source', authenticateJWT, async (req, res) => {
+  try {
+    const role = getAuthenticatedRole(req);
+    const allowedRoles = ['admin', 'clinician', 'radiologist', 'researcher'];
+    if (!allowedRoles.includes(role)) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Insufficient permissions to view documents' },
+      });
+    }
+
+    const id = requireDocumentId(req, res);
+    if (!id) return;
+
+    const { data: document, error: docError } = await supabase
+      .from('documents')
+      .select('id, title, source, metadata')
+      .eq('id', id)
+      .single();
+
+    if (docError || !document) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Document not found' },
+      });
+    }
+
+    const storageLoc = getStoragePdfLocationFromMetadata(
+      document.metadata as Record<string, unknown> | null | undefined
+    );
+    if (storageLoc) {
+      const { data: blob, error: dlError } = await supabase.storage
+        .from(storageLoc.bucket)
+        .download(storageLoc.objectPath);
+
+      if (dlError || !blob) {
+        logger.warn('Document PDF missing in storage', {
+          documentId: id,
+          bucket: storageLoc.bucket,
+          objectPath: storageLoc.objectPath,
+          error: dlError?.message,
+        });
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'SOURCE_MISSING',
+            message:
+              'Không tải được file PDF từ kho lưu trữ. Kiểm tra bucket Supabase Storage và quyền service role.',
+          },
+        });
+      }
+
+      const arrayBuffer = await blob.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const hint = storageLoc.originalName?.trim()
+        ? sanitizeArtifactName(storageLoc.originalName.trim())
+        : path.basename(storageLoc.objectPath);
+      const safeName = (hint || 'document.pdf').replace(/[^\w.\- ()\[\]]+/g, '_').slice(0, 200) || 'document.pdf';
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(safeName)}`);
+      res.send(buffer);
+
+      logger.info('Document source PDF served from storage', {
+        documentId: id,
+        bucket: storageLoc.bucket,
+        user: getAuthenticatedUserId(req),
+      });
+      return;
+    }
+
+    const sourceArtifact = getDocumentSourceArtifact(document);
+    if (!sourceArtifact?.path) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'NO_SOURCE_FILE',
+          message: 'Không có file PDF gốc trên máy chủ cho tài liệu này',
+        },
+      });
+    }
+
+    const candidates = uniqueResolvedPaths([
+      ...remapLegacyKnowledgeBaseCandidates(sourceArtifact.path),
+      sourceArtifact.path,
+    ]);
+
+    let resolved: { abs: string; downloadName: string } | null = null;
+    for (const candidate of candidates) {
+      const r = resolveAllowedSourcePdf(candidate, sourceArtifact.originalName);
+      if (!r) continue;
+      try {
+        await fs.access(r.abs);
+        resolved = r;
+        break;
+      } catch {
+        /* try next candidate */
+      }
+    }
+
+    if (!resolved) {
+      const anyAllowed = candidates.some((c) => resolveAllowedSourcePdf(c, sourceArtifact.originalName));
+      if (!anyAllowed) {
+        logger.warn('Rejected document source path (outside allowed roots)', {
+          documentId: id,
+          path: sourceArtifact.path,
+          candidates,
+        });
+        return res.status(403).json({
+          success: false,
+          error: { code: 'INVALID_SOURCE_PATH', message: 'Source path is not allowed' },
+        });
+      }
+
+      logger.warn('Document PDF not on disk (tried all candidates)', {
+        documentId: id,
+        storedPath: sourceArtifact.path,
+        candidates,
+      });
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'SOURCE_MISSING',
+          message:
+            'Không tìm thấy file PDF trên máy chạy API. Với đường dẫn cũ trong CSDL, hãy tạo đúng thư mục con sau `knowledge_base/` (ví dụ `knowledge_base/downloads/`) trong repo hoặc trong `apps/api/knowledge_base/`, đặt file PDF đúng tên, hoặc tải lại tài liệu bằng nút Tải lên.',
+        },
+      });
+    }
+
+    if (path.resolve(sourceArtifact.path) !== resolved.abs) {
+      logger.info('Serving document PDF from local path (remapped or alternate root)', {
+        documentId: id,
+        storedPath: sourceArtifact.path,
+        localPath: resolved.abs,
+      });
+    }
+
+    const safeName = resolved.downloadName;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(safeName)}`);
+
+    const stream = createReadStream(resolved.abs);
+    stream.on('error', (err) => {
+      logger.error('Document PDF stream error', { documentId: id, error: err });
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          error: { code: 'STREAM_ERROR', message: 'Failed to read PDF file' },
+        });
+      } else {
+        res.destroy(err);
+      }
+    });
+    stream.pipe(res);
+
+    logger.info('Document source PDF served', {
+      documentId: id,
+      user: getAuthenticatedUserId(req),
+    });
+  } catch (err) {
+    logger.error('Document source error', { error: err });
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: err instanceof Error ? err.message : 'Unknown error',
+        },
+      });
+    }
+  }
+});
+
+/**
  * GET /api/documents/:id
  * Get document detail with chunks
  */
@@ -389,6 +656,9 @@ router.delete('/:id', authenticateJWT, async (req, res) => {
       user: getAuthenticatedUserId(req),
     });
 
+    await removeKnowledgeSourcePdfFromStorage(
+      document.metadata as Record<string, unknown> | null | undefined
+    );
     await removeManagedArtifact(document);
 
     res.json({
@@ -449,34 +719,59 @@ router.post('/:id/reingest', authenticateJWT, async (req, res) => {
       });
     }
 
-    // Check if source file exists
-    try {
-      await fs.access(sourceArtifact.path);
-    } catch {
+    const candidates = uniqueResolvedPaths([
+      ...remapLegacyKnowledgeBaseCandidates(sourceArtifact.path),
+      sourceArtifact.path,
+    ]);
+
+    let validated: { abs: string; downloadName: string } | null = null;
+    for (const candidate of candidates) {
+      const r = resolveAllowedSourcePdf(candidate, sourceArtifact.originalName);
+      if (!r) continue;
+      try {
+        await fs.access(r.abs);
+        validated = r;
+        break;
+      } catch {
+        /* try next */
+      }
+    }
+
+    if (!validated) {
+      const anyAllowed = candidates.some((c) => resolveAllowedSourcePdf(c, sourceArtifact.originalName));
+      if (!anyAllowed) {
+        return res.status(403).json({
+          error: 'Source path not allowed',
+          message: 'Source artifact path is outside allowed knowledge_base / upload directories',
+        });
+      }
       return res.status(409).json({
         error: 'Source artifact missing',
-        message: `Cannot reingest: source artifact ${sourceArtifact.path} does not exist`,
+        message:
+          'Cannot reingest: PDF file not found on disk. Place it under knowledge_base/... in the repo or apps/api, or re-upload.',
       });
     }
+
+    const sourceArtifactLocal = { ...sourceArtifact, path: validated.abs };
 
     logger.info('Starting document reingest', {
       documentId: id,
       title: document.title,
-      source: sourceArtifact.path,
+      source: validated.abs,
       user: getAuthenticatedUserId(req),
     });
 
-    const job = ingestionJobStore.createJob(sourceArtifact.path);
+    const job = ingestionJobStore.createJob(validated.abs);
 
     ingestionService
-      .ingestDocument(sourceArtifact.path, {
+      .ingestDocument(validated.abs, {
         chunking: {
           max_tokens: 512,
           overlap_tokens: 50,
         },
         skip_existing: false,
         existingDocumentId: id,
-        sourceArtifact,
+        sourceArtifact: sourceArtifactLocal,
         progressCallback: (update: IngestionProgressUpdate) => {
           ingestionJobStore.applyProgress(job.id, update);
         },

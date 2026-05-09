@@ -5,6 +5,7 @@ import {
   AlertCircle, Bot, Brain, CheckCircle2, ChevronDown, ChevronUp,
   Loader2, MessageSquare, RefreshCw, Send, Volume2, Zap,
 } from 'lucide-react';
+import { jsonAuthHeaders } from '@/lib/api/client';
 import { BlockRenderer } from './BlockRenderer';
 import type { RenderableBlock, CitationAnchor, CAESSEEvent, DoneEvent } from '@/types/cae-output';
 
@@ -68,9 +69,10 @@ async function consumeCAESSE(
   },
   signal: AbortSignal
 ) {
+  const headers = await jsonAuthHeaders();
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
     signal,
     credentials: 'include',
@@ -369,9 +371,10 @@ export default function CAEPanel({ episodeId, currentStep }: { episodeId: string
     if (!content || isTtsLoading) return;
     setIsTtsLoading(true);
     try {
+      const headers = await jsonAuthHeaders();
       const response = await fetch(`${API_BASE}/api/cae/tts`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ text: content.slice(0, 1500), voice: 'Mia' }),
         credentials: 'include',
       });

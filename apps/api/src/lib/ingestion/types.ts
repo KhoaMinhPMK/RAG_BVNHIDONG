@@ -153,6 +153,8 @@ export interface IngestionOptions {
   existingDocumentId?: string;
   sourceArtifact?: IngestionSourceArtifact;
   progressCallback?: (update: IngestionProgressUpdate) => void | Promise<void>;
+  /** When true (default), upload original PDF to Supabase Storage after chunks are stored. Set false to skip. */
+  uploadSourcePdfToStorage?: boolean;
 }
 
 // ============================================================================

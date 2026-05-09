@@ -69,6 +69,16 @@ export async function getAuthToken(): Promise<string | null> {
   }
 }
 
+/** Headers for JSON POST (e.g. CAE SSE) including Bearer JWT when logged in. */
+export async function jsonAuthHeaders(): Promise<Record<string, string>> {
+  const token = await getAuthToken();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 // ============================================================================
 // Core API call function
 // ============================================================================

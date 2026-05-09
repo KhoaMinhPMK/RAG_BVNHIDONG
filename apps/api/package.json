@@ -10,6 +10,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "seed": "tsx src/scripts/seed-episodes.ts",
+    "sync:knowledge-downloads": "tsx src/scripts/sync-knowledge-downloads.ts",
     "backfill:artifacts": "tsx src/scripts/backfill-document-artifacts.ts",
     "benchmark:retrieval": "tsx src/scripts/benchmark-knowledge-ranking.ts",
     "eval:rag": "tsx src/scripts/eval-rag.ts",

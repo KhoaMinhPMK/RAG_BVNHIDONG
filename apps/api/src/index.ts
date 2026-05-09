@@ -26,8 +26,8 @@ import caeRoutes from './routes/cae.js';
 import aiRunsRoutes from './routes/ai-runs.js';
 
 const app: Express = express();
-const PORT = process.env.PORT || 3001;
-const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3000';
+const PORT = process.env.PORT || 3005;
+const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3001';
 
 // ============================================================================
 // Middleware
@@ -70,6 +70,7 @@ app.get('/health', async (req: Request, res: Response) => {
   let embeddingDim = 0;
   let mimoOk = false;
   let mimoModel = '';
+  let mimoDetail: string | undefined;
   let caeStatus: 'ready' | 'degraded' | 'disconnected' = 'disconnected';
   let caeProvider = '';
   let caeModel = '';
@@ -89,18 +90,27 @@ app.get('/health', async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Embedding health check failed', { error });
   }
-  try {
-    const { testLLMProvider } = await import('./lib/llm/unified.js');
-    const mimoResult = await Promise.race([
-      testLLMProvider('mimo'),
-      new Promise<{ ok: false; model: string; error: string }>((resolve) =>
-        setTimeout(() => resolve({ ok: false, model: '', error: 'timeout' }), 5000)
-      ),
-    ]);
-    mimoOk = mimoResult.ok;
-    mimoModel = mimoResult.model;
-  } catch (error) {
-    logger.error('MiMo health check failed', { error });
+  if (!process.env.MIMO_API_KEY?.trim()) {
+    mimoDetail = 'Chưa cấu hình MIMO_API_KEY trong apps/api/.env';
+  } else {
+    try {
+      const { testLLMProvider } = await import('./lib/llm/unified.js');
+      // Allow longer than embedding/Ollama; MiMo ping uses /models (up to 12s) + optional chat fallback.
+      const mimoResult = await Promise.race([
+        testLLMProvider('mimo'),
+        new Promise<{ ok: false; model: string; error: string }>((resolve) =>
+          setTimeout(() => resolve({ ok: false, model: '', error: 'timeout' }), 25_000)
+        ),
+      ]);
+      mimoOk = mimoResult.ok;
+      mimoModel = mimoResult.model;
+      if (!mimoOk && 'error' in mimoResult && mimoResult.error) {
+        mimoDetail = mimoResult.error;
+      }
+    } catch (error) {
+      logger.error('MiMo health check failed', { error });
+      mimoDetail = error instanceof Error ? error.message : 'health check failed';
+    }
   }
 
   if (supabaseOk && embeddingOk && (mimoOk || ollamaOk)) {
@@ -119,7 +129,11 @@ app.get('/health', async (req: Request, res: Response) => {
       supabase:  { status: supabaseOk ? 'connected' : 'disconnected' },
       cae:       { status: caeStatus, provider: caeProvider, model: caeModel },
       ollama:    { status: ollamaOk ? 'connected' : 'disconnected', model: ollamaModel },
-      mimo:      { status: mimoOk ? 'connected' : 'disconnected',   model: mimoModel },
+      mimo:      {
+        status: mimoOk ? 'connected' : 'disconnected',
+        model: mimoModel,
+        ...(mimoDetail ? { detail: mimoDetail } : {}),
+      },
       embedding: { status: embeddingOk ? 'connected' : 'disconnected', model: embeddingModel, dim: embeddingDim },
     },
   };
@@ -154,6 +168,7 @@ app.get('/api', (req: Request, res: Response) => {
       detectionStatus: 'GET /api/detect/:id',
       documents: 'GET /api/documents',
       documentDetail: 'GET /api/documents/:id',
+      documentSourcePdf: 'GET /api/documents/:id/source',
       deleteDocument: 'DELETE /api/documents/:id',
       reingestDocument: 'POST /api/documents/:id/reingest',
     },

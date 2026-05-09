@@ -122,14 +122,41 @@ export async function testLLMProvider(
   const t0 = Date.now();
   try {
     if (provider === 'mimo') {
+      if (!process.env.MIMO_API_KEY?.trim()) {
+        return {
+          ok: false,
+          model: '',
+          error: 'MIMO_API_KEY not configured',
+          latency_ms: Date.now() - t0,
+        };
+      }
       const { getMiMoClient } = await import('../mimo/client.js');
       const client = getMiMoClient();
-      const result = await client.chat(
-        [{ role: 'user', content: 'ping' }],
-        { max_tokens: 8, temperature: 0.1 }
-      );
-      const model = result.model || (process.env.MIMO_MODEL_PRIMARY || 'mimo-v2.5-pro');
-      return { ok: true, model, latency_ms: Date.now() - t0 };
+      const ping = await client.pingModels();
+      if (ping.ok) {
+        return {
+          ok: true,
+          model: ping.model || (process.env.MIMO_MODEL_PRIMARY || 'mimo-v2.5-pro'),
+          latency_ms: Date.now() - t0,
+        };
+      }
+      // Fallback: minimal chat (some deployments may not expose /models)
+      try {
+        const result = await client.chat(
+          [{ role: 'user', content: 'ping' }],
+          { max_tokens: 8, temperature: 0.1, thinking: 'disabled' }
+        );
+        const model = result.model || (process.env.MIMO_MODEL_PRIMARY || 'mimo-v2.5-pro');
+        return { ok: true, model, latency_ms: Date.now() - t0 };
+      } catch (chatErr) {
+        const chatMsg = chatErr instanceof Error ? chatErr.message : String(chatErr);
+        return {
+          ok: false,
+          model: '',
+          error: ping.error ? `${ping.error} | chat: ${chatMsg}` : chatMsg,
+          latency_ms: Date.now() - t0,
+        };
+      }
     } else {
       const { ollamaClient } = await import('../ollama/client.js');
       const connected = await ollamaClient.testConnection();

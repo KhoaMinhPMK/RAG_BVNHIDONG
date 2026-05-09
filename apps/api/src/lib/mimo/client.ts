@@ -4,6 +4,8 @@
  * Docs: https://platform.xiaomimimo.com/docs/en-US/api/chat/openai-api
  */
 
+import { logger } from '../utils/logger.js';
+
 // ─── Message types ────────────────────────────────────────────────────────────
 
 export interface MiMoMessage {
@@ -103,7 +105,11 @@ export class MiMoClient {
   private ttsModel: string;
 
   constructor() {
-    this.baseUrl = process.env.MIMO_BASE_URL || 'https://api.xiaomimimo.com/v1';
+    // Token-plan keys (tp-…) use the dedicated OpenAI-compatible host; override with MIMO_BASE_URL if needed.
+    // Standard keys: https://api.xiaomimimo.com/v1 — see https://platform.xiaomimimo.com/
+    this.baseUrl =
+      process.env.MIMO_BASE_URL?.trim() ||
+      'https://token-plan-sgp.xiaomimimo.com/v1';
     this.apiKey = process.env.MIMO_API_KEY || '';
     this.primaryModel = process.env.MIMO_MODEL_PRIMARY || 'mimo-v2.5-pro';
     this.fallbackModel = process.env.MIMO_MODEL_FALLBACK || 'mimo-v2.5';
@@ -111,15 +117,59 @@ export class MiMoClient {
     this.ttsModel = process.env.MIMO_MODEL_TTS || 'mimo-v2.5-tts';
 
     if (!this.apiKey) {
-      console.warn('[MiMo] API key not configured');
+      logger.warn(
+        '[MiMo] MIMO_API_KEY is not set — add it to apps/api/.env for cloud MiMo; CAE/query can still use Ollama.'
+      );
     }
   }
 
   private getHeaders(includeJsonContentType: boolean = true): Record<string, string> {
-    return {
-      ...(includeJsonContentType ? { 'Content-Type': 'application/json' } : {}),
-      'api-key': this.apiKey,
-    };
+    // Official MiMo OpenAI examples use `api-key` only (not Authorization Bearer).
+    const h: Record<string, string> = { 'api-key': this.apiKey };
+    if (includeJsonContentType) {
+      h['Content-Type'] = 'application/json';
+    }
+    return h;
+  }
+
+  /**
+   * Fast connectivity check (GET /models) — suitable for /health; avoids slow chat + long timeouts.
+   */
+  async pingModels(signal?: AbortSignal): Promise<{ ok: boolean; model: string; error?: string }> {
+    if (!this.apiKey.trim()) {
+      return { ok: false, model: '', error: 'MIMO_API_KEY not configured' };
+    }
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(new Error('MiMo /models timeout')), 12_000);
+    if (signal) {
+      signal.addEventListener('abort', () => ac.abort(signal.reason), { once: true });
+    }
+    try {
+      const response = await fetch(`${this.baseUrl}/models`, {
+        method: 'GET',
+        headers: this.getHeaders(false),
+        signal: ac.signal,
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        return {
+          ok: false,
+          model: '',
+          error: `HTTP ${response.status}: ${text.slice(0, 240)}`,
+        };
+      }
+      const data = (await response.json()) as { data?: Array<{ id?: string }> };
+      const firstId = data.data?.find((m) => m.id)?.id ?? '';
+      return {
+        ok: true,
+        model: firstId || this.primaryModel,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, model: '', error: msg };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   // ─── Basic chat (non-streaming, no tools) ──────────────────────────────────
@@ -422,7 +472,7 @@ export class MiMoClient {
       return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn('[MiMo] isAvailable check failed:', msg);
+      logger.warn('[MiMo] isAvailable check failed', { message: msg });
       return false;
     }
   }

@@ -182,6 +182,19 @@ function BreadcrumbInner() {
     );
   }
 
+  if (/^\/knowledge\/[^/]+\/view$/.test(pathname)) {
+    return (
+      <nav className="flex items-center gap-1.5 text-[11px]">
+        <Link href="/knowledge" className="text-text-tertiary hover:text-text-secondary transition-colors flex items-center gap-1">
+          <ArrowLeft className="w-3 h-3" />
+          <span>Kho Tri thức</span>
+        </Link>
+        <ChevronRight className="w-3 h-3 text-border shrink-0" />
+        <span className="font-semibold text-text-primary">Xem PDF</span>
+      </nav>
+    );
+  }
+
   const pageNames: Record<string, string> = {
     '/': 'Worklist', '/cases/new': 'Tạo ca mới',
     '/knowledge': 'Kho Tri thức', '/admin': 'Quản trị',

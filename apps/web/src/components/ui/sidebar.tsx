@@ -46,17 +46,22 @@ const systemInfo = [
 
 export function Sidebar({ collapsed, onToggle, forceCollapsed = false }: SidebarProps) {
   const pathname = usePathname();
-  const { role, loading } = useAuth();
+  const { role, loading, user } = useAuth();
 
   function isActive(item: typeof navItems[0]) {
     if (item.exact) return pathname === item.href;
     return pathname.startsWith(item.href);
   }
 
-  // Filter nav items based on user role
-  // All authenticated users can see all items since middleware handles routing
+  const SKIP_AUTH = process.env.NEXT_PUBLIC_SKIP_AUTH === 'true';
+
+  // Filter nav items based on user role.
+  // In SKIP_AUTH mode show all items — role comes from DEV_ROLE (default: 'admin').
   const visibleNavItems = navItems.filter(item => {
+    if (SKIP_AUTH) return item.roles.includes(role ?? 'admin');
     if (loading) return false;
+    // Session ready but profile query still in flight — show non–admin-only links
+    if (user && !role) return item.roles.includes('clinician');
     if (!role) return false;
     return item.roles.includes(role);
   });

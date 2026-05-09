@@ -25,11 +25,25 @@ export async function middleware(request: NextRequest) {
 
   console.log('[Middleware] Request:', pathname)
 
+  // Bypass all auth checks in dev/demo mode
+  if (process.env.NEXT_PUBLIC_SKIP_AUTH === 'true') {
+    return NextResponse.next()
+  }
+
   // Check if route is public
   const isPublicRoute = PUBLIC_ROUTES.some(route => pathname.startsWith(route))
 
   if (isPublicRoute) {
     console.log('[Middleware] Public route, allowing access')
+    return NextResponse.next()
+  }
+
+  // Guard: if Supabase env vars are missing, skip auth check
+  // (auth-context will handle the redirect client-side)
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!supabaseUrl || !supabaseKey) {
+    console.warn('[Middleware] Supabase env vars missing, skipping auth check')
     return NextResponse.next()
   }
 
@@ -41,8 +55,8 @@ export async function middleware(request: NextRequest) {
   })
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseKey,
     {
       cookies: {
         getAll() {
@@ -76,16 +90,14 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl)
   }
 
-  // Check role-based access
-  // Fetch user profile to get role
+  // Check role-based access — profiles table uses user_id column
   const { data: profile } = await supabase
     .from('profiles')
     .select('role')
-    .eq('id', user.id)
+    .eq('user_id', user.id)
     .single()
 
   if (profile?.role) {
-    // Check if route requires specific role
     for (const [role, routes] of Object.entries(ROLE_ROUTES)) {
       if (routes.some(route => pathname.startsWith(route))) {
         if (profile.role !== role) {

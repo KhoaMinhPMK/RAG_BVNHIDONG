@@ -9,7 +9,8 @@ async function testMiMoAPI() {
   console.log('🧪 Testing MiMo API...\n');
 
   const apiKey = process.env.MIMO_API_KEY;
-  const baseUrl = process.env.MIMO_BASE_URL || 'https://api.xiaomimimo.com/v1';
+  const baseUrl =
+    process.env.MIMO_BASE_URL?.trim() || 'https://token-plan-sgp.xiaomimimo.com/v1';
 
   if (!apiKey) {
     console.error('❌ MIMO_API_KEY not set');

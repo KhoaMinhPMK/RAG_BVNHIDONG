@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Hook: session-context
+# Event: sessionStart
+# Mục đích: Inject ngữ cảnh chuyên môn của hệ thống RAG y tế nhi khoa vào đầu mỗi session.
+# Giúp AI assistant hiểu đúng domain và tránh đưa ra suggestion sai nghiệp vụ.
+
+cat << 'EOF'
+{
+  "additional_context": "## Ngữ cảnh dự án: WebRAG — Hệ thống RAG Y tế Nhi khoa (Bệnh viện Nhi Đồng)\n\n### Domain & Business Rules\n- Hệ thống hỗ trợ bác sĩ/kỹ thuật viên X-quang nhi đọc và phân tích hình ảnh X-quang ngực.\n- Pipeline: `pending_detection` → `pending_explain` → `pending_draft` → `pending_approval` → `completed`\n- **Draft report phải được bác sĩ có thẩm quyền phê duyệt (e-sign) trước khi lưu chính thức**.\n- Mọi thay đổi nghiệp vụ quan trọng cần cân nhắc tác động đến audit trail và RBAC.\n\n### Kiến trúc\n- **Monorepo**: apps/web (Next.js 14, App Router), apps/api (Express ESM), packages/db (@webrag/db, Supabase), packages/shared (Zod schemas)\n- **AI stack**: Ollama (LLM), embedding service, CAE (SSE streaming), pgvector\n- **Auth**: Supabase JWT + RBAC. Roles: `clinician | radiologist | researcher | admin`\n- **Dev bypass**: `NEXT_PUBLIC_SKIP_AUTH=true` / `SKIP_AUTH=true` — KHÔNG dùng trên production\n\n### Quy tắc code quan trọng\n- Luôn validate input bằng Zod schema từ `@webrag/shared`\n- RBAC check qua `requirePermission()` — không hardcode role check trong route handler\n- Audit log mọi action nhạy cảm qua `auditMiddleware`\n- RLS trên Supabase là TODO — chưa bật; tuyệt đối không expose Supabase service key ra client\n- CAE streaming dùng SSE — không dùng WebSocket\n- Ngôn ngữ UI: Tiếng Việt (`lang=\"vi\"`); i18n qua `next-intl`\n\n### Files nhạy cảm (cần review kỹ trước khi sửa)\n- `apps/web/middleware.ts` — auth gate toàn bộ Next.js routes\n- `apps/api/src/middleware/auth.ts` — JWT verification\n- `apps/api/src/middleware/rbac.ts` — permission matrix\n- `apps/api/src/lib/supabase/schema.sql` — DB schema reference\n- `.env` / `.env.local` / `*.env.*` — biến môi trường\n\n### Lưu ý an toàn\n- Không log thông tin bệnh nhân (tên, CMND, ngày sinh, mã hồ sơ) ra console/file\n- Không commit secrets, JWT tokens, Supabase keys vào git\n- Không chạy lệnh DROP/DELETE/TRUNCATE không có WHERE trên production DB"
+}
+EOF

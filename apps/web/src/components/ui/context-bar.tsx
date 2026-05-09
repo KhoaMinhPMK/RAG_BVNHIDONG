@@ -20,12 +20,19 @@ function getCaseLabel(pathname: string, step: string | null): { title: string; d
   };
 }
 
+function getKnowledgePdfViewLabel(pathname: string, titleParam: string | null): { title: string; description: string } | null {
+  if (!/^\/knowledge\/[^/]+\/view$/.test(pathname)) return null;
+  const title = titleParam?.trim() || 'Tài liệu';
+  return { title, description: 'Xem PDF gốc trong kho tri thức' };
+}
+
 export function ContextBar() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const caseLabel = getCaseLabel(pathname, searchParams.get('step'));
-  const page = caseLabel ?? pageLabels[pathname] ?? { title: pathname, description: '' };
+  const knowledgePdf = getKnowledgePdfViewLabel(pathname, searchParams.get('title'));
+  const page = caseLabel ?? knowledgePdf ?? pageLabels[pathname] ?? { title: pathname, description: '' };
 
   return (
     <div className="h-9 border-b border-border bg-background-secondary flex items-center px-4 gap-4 shrink-0">

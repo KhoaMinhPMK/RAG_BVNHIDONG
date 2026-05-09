@@ -3,6 +3,7 @@
  */
 
 import { useState, useRef, useCallback } from 'react';
+import { jsonAuthHeaders } from '@/lib/api/client';
 import type { RenderableBlock, CitationAnchor, CAESSEEvent, DoneEvent, UIAction } from '@/types/cae-output';
 
 interface CAEStreamContext {
@@ -64,9 +65,10 @@ async function consumeCAESSE(
   },
   signal: AbortSignal
 ) {
+  const headers = await jsonAuthHeaders();
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
     signal,
     credentials: 'include',

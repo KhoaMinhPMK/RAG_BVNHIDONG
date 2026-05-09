@@ -8,9 +8,8 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
-import { User, Session } from '@supabase/supabase-js';
+import { User, Session, SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/client';
-import { useRouter } from 'next/navigation';
 
 // Role type matching backend RBAC
 export type Role = 'clinician' | 'radiologist' | 'researcher' | 'admin';
@@ -36,22 +35,31 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Supabase client - created once and reused
-const supabase = createClient();
+// When NEXT_PUBLIC_SKIP_AUTH=true, bypass Supabase entirely (dev/demo mode).
+// Set NEXT_PUBLIC_DEV_ROLE to control which role is simulated (default: 'admin').
+const SKIP_AUTH = process.env.NEXT_PUBLIC_SKIP_AUTH === 'true';
+const DEV_ROLE = (process.env.NEXT_PUBLIC_DEV_ROLE as Role | undefined) ?? 'admin';
+
+// Lazy Supabase client — only instantiated when credentials are present.
+// Avoids module-level crash when NEXT_PUBLIC_SUPABASE_* env vars are missing.
+let _supabase: SupabaseClient | null = null;
+function getSupabase(): SupabaseClient {
+  if (!_supabase) _supabase = createClient();
+  return _supabase;
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const router = useRouter();
+  const [loading, setLoading] = useState(!SKIP_AUTH);
 
   const fetchProfile = useCallback(async (userId: string): Promise<UserProfile | null> => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from('profiles')
         .select('*')
-        .eq('user_id', userId)  // ✅ Fixed: use user_id instead of id
+        .eq('user_id', userId)
         .single();
 
       if (error) {
@@ -71,21 +79,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Initialize auth state + listen for changes
+  // Initialize auth state + listen for changes.
+  // Skipped entirely in SKIP_AUTH mode.
   useEffect(() => {
+    if (SKIP_AUTH) return;
+
     let mounted = true;
 
     const initAuth = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const { data: { session } } = await getSupabase().auth.getSession();
         if (!mounted) return;
 
         if (session?.user) {
           console.log('[Auth] Found existing session:', session.user.email);
           setUser(session.user);
           setSession(session);
-          const userProfile = await fetchProfile(session.user.id);
-          if (mounted) setProfile(userProfile);
+          // Profile loads in background — do not await here. A hung or slow
+          // `profiles` query must not keep `loading` true or the shell never renders.
+          void fetchProfile(session.user.id).then((userProfile) => {
+            if (mounted) setProfile(userProfile);
+          });
         }
       } catch (error) {
         console.error('[Auth] Error initializing auth:', error);
@@ -96,7 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     initAuth();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    const { data: { subscription } } = getSupabase().auth.onAuthStateChange(
       async (event, newSession) => {
         console.log('[Auth] State changed:', event, newSession?.user?.email);
         if (!mounted) return;
@@ -105,10 +119,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(newSession?.user ?? null);
 
         if (newSession?.user) {
-          const userProfile = await fetchProfile(newSession.user.id);
-          if (mounted) setProfile(userProfile);
+          void fetchProfile(newSession.user.id).then((userProfile) => {
+            if (mounted) setProfile(userProfile);
+          });
         } else {
-          if (mounted) setProfile(null);
+          setProfile(null);
         }
 
         if (mounted) setLoading(false);
@@ -122,8 +137,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [fetchProfile]);
 
   const signIn = useCallback(async (email: string, password: string) => {
+    if (SKIP_AUTH) return { error: null };
+
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await getSupabase().auth.signInWithPassword({
         email,
         password,
       });
@@ -138,7 +155,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // onAuthStateChange will handle setUser/setProfile
-      // Just wait a tick then return
       await new Promise(resolve => setTimeout(resolve, 300));
 
       return { error: null };
@@ -149,9 +165,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    if (SKIP_AUTH) return;
+
     try {
       console.log('[Auth] Signing out...');
-      await supabase.auth.signOut();
+      await getSupabase().auth.signOut();
       setSession(null);
       setUser(null);
       setProfile(null);
@@ -167,7 +185,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     session,
     user,
     profile,
-    role: profile?.role || null,
+    role: SKIP_AUTH ? DEV_ROLE : (profile?.role ?? null),
     loading,
     signIn,
     signOut,

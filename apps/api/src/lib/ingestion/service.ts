@@ -21,6 +21,10 @@ import {
 } from './types.js';
 import { logger } from '../utils/logger.js';
 import crypto from 'crypto';
+import {
+  isKnowledgePdfStorageUploadEnabled,
+  uploadKnowledgeSourcePdfAfterIngest,
+} from '../supabase/knowledge-pdf-storage.js';
 
 // ============================================================================
 // Ingestion Service Class
@@ -187,6 +191,24 @@ export class IngestionService {
           });
         },
       });
+
+      const wantStorage =
+        opts.uploadSourcePdfToStorage !== false && isKnowledgePdfStorageUploadEnabled();
+      if (wantStorage) {
+        try {
+          await uploadKnowledgeSourcePdfAfterIngest(
+            documentId,
+            filePath,
+            opts.sourceArtifact?.original_name
+          );
+        } catch (storageErr) {
+          logger.warn('PDF storage upload failed after successful ingest', {
+            documentId,
+            filePath,
+            error: storageErr instanceof Error ? storageErr.message : String(storageErr),
+          });
+        }
+      }
 
       const duration = Date.now() - startTime;
 

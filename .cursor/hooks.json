@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": ".cursor/hooks/session-context.sh",
+        "timeout": 5
+      }
+    ],
+    "subagentStart": [
+      {
+        "command": ".cursor/hooks/testing-agent.sh",
+        "timeout": 8
+      }
+    ],
+    "subagentStop": [
+      {
+        "command": ".cursor/hooks/flow-quality-check.sh",
+        "timeout": 8,
+        "loop_limit": 1
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": ".cursor/hooks/phi-guard.sh",
+        "matcher": "UserPromptSubmit",
+        "timeout": 8,
+        "failClosed": false
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": ".cursor/hooks/guard-shell.sh",
+        "timeout": 10,
+        "failClosed": true
+      },
+      {
+        "command": ".cursor/hooks/deploy-preflight.sh",
+        "matcher": "vercel|yarn.*build|npm.*build|yarn.*deploy|npm.*deploy|supabase.*push|pm2|docker.*build",
+        "timeout": 15,
+        "failClosed": false
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": ".cursor/hooks/guard-auth-writes.sh",
+        "matcher": "Write",
+        "timeout": 8,
+        "failClosed": false
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": ".cursor/hooks/format-ts.sh",
+        "matcher": "Write",
+        "timeout": 30
+      },
+      {
+        "command": ".cursor/hooks/ux-component-review.sh",
+        "matcher": "Write",
+        "timeout": 10
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": ".cursor/hooks/guard-supabase-mcp.sh",
+        "timeout": 10,
+        "failClosed": true
+      }
+    ]
+  }
+}

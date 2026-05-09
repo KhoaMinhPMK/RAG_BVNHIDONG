@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft, Upload, ImageIcon, X, Check, ChevronRight, Loader2, File } from 'lucide-react';
 import { createEpisode } from '@/lib/api/client';
 import { PageTransition } from '@/components/ui/page-transition';
-import { FileItemSkeleton, ProgressSkeleton } from '@/components/ui/loading-skeleton';
+import { FileItemSkeleton } from '@/components/ui/loading-skeleton';
 
 interface PatientInfo {
   age: string;
@@ -27,6 +27,7 @@ interface UploadFile {
   name: string;
   size: number;
   info: PatientInfo;
+  file: File;
 }
 
 const blankInfo = (): PatientInfo => ({
@@ -50,6 +51,7 @@ export default function NewCasePage() {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'processing' | 'done' | 'error'>('idle');
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadPhase, setUploadPhase] = useState<string>('');
 
   const addFiles = useCallback((incoming: FileList | null) => {
     if (!incoming) return;
@@ -59,7 +61,7 @@ export default function NewCasePage() {
       if (file.size > 10 * 1024 * 1024) continue;
       if (!allowed.includes(file.type) && !file.name.endsWith('.dcm')) continue;
       const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      added.push({ id, name: file.name, size: file.size, info: blankInfo() });
+      added.push({ id, name: file.name, size: file.size, info: blankInfo(), file });
     }
     setFiles(prev => {
       const next = [...prev, ...added];
@@ -90,41 +92,65 @@ export default function NewCasePage() {
     if (!activeFile) return;
     const { info } = activeFile;
     if (!info.pid || !info.date) {
-      setUploadError('Vui lòng điền Mã BN và Ngày nhập viện.');
+      setUploadError(!info.pid ? 'Vui lòng nhập Mã BN.' : 'Vui lòng nhập Ngày chụp.');
+      setUploadStatus('error');
       return;
     }
     setSubmitting(true);
     setUploadStatus('uploading');
-    setUploadProgress(30);
-    setUploadError(null);
+    setUploadProgress(5);
+    setUploadPhase('Đang chuẩn bị...');
+
+    // Animate progress from 5% → 85% while waiting for server
+    let animProgress = 5;
+    const phases = [
+      { at: 15, msg: 'Đang tải ảnh lên máy chủ...' },
+      { at: 40, msg: 'Lưu hồ sơ bệnh nhân...' },
+      { at: 65, msg: 'Xử lý ảnh X-quang...' },
+      { at: 80, msg: 'Khởi tạo phân tích AI...' },
+    ];
+    const timer = setInterval(() => {
+      animProgress = Math.min(animProgress + 2, 85);
+      setUploadProgress(animProgress);
+      const phase = [...phases].reverse().find(p => animProgress >= p.at);
+      if (phase) setUploadPhase(phase.msg);
+    }, 300);
 
     try {
-      const res = await createEpisode({
-        patient_ref: info.pid,
-        age: info.age || undefined,
-        gender: info.gender || undefined,
-        date: info.date,
-        symptoms: info.symptoms || undefined,
-        spo2: info.spo2 || undefined,
-        crp: info.crp || undefined,
-      });
+      const res = await createEpisode(
+        {
+          patient_ref: info.pid,
+          age: info.age || undefined,
+          gender: info.gender || undefined,
+          date: info.date,
+          symptoms: info.symptoms || undefined,
+          spo2: info.spo2 || undefined,
+          crp: info.crp || undefined,
+        },
+        activeFile.file
+      );
 
+      clearInterval(timer);
       setUploadProgress(100);
+      setUploadPhase('Hoàn tất!');
+
       if (res.success && res.episode) {
         setUploadStatus('done');
         setTimeout(() => {
           router.push(`/cases/${res.episode.episode_id}?step=detection`);
-        }, 400);
+        }, 500);
       } else {
         setUploadStatus('error');
         setUploadError(res.error?.message || 'Không thể tạo ca. Vui lòng thử lại.');
         setSubmitting(false);
       }
     } catch {
+      clearInterval(timer);
       setUploadStatus('error');
       setUploadError('Lỗi kết nối tới server. Vui lòng thử lại.');
       setSubmitting(false);
       setUploadProgress(null);
+      setUploadPhase('');
     }
   };
 
@@ -204,8 +230,7 @@ export default function NewCasePage() {
               <div className="divide-y divide-border max-h-64 overflow-y-auto">
                 {files.map(f => {
                   const isActive = f.id === activeId;
-                  const filled = Object.values(f.info).filter(Boolean).length;
-                  const total = Object.keys(f.info).length;
+                  const missingRequired = !f.info.pid || !f.info.date;
                   return (
                     <button
                       key={f.id}
@@ -215,11 +240,11 @@ export default function NewCasePage() {
                       <File className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-brand-primary' : 'text-text-tertiary'}`} />
                       <div className="flex-1 min-w-0">
                         <p className={`text-[11px] font-medium truncate ${isActive ? 'text-brand-primary' : 'text-text-primary'}`}>{f.name}</p>
-                        <div className="flex items-center gap-1.5 mt-0.5">
+                        <div className="flex items-center gap-2 mt-0.5">
                           <span className="text-[10px] text-text-tertiary">{formatSize(f.size)}</span>
-                          <div className="flex-1 h-1 bg-border rounded-full overflow-hidden">
-                            <div className="h-full bg-brand-primary/50 rounded-full transition-all" style={{ width: `${(filled / total) * 100}%` }} />
-                          </div>
+                          {missingRequired && (
+                            <span className="text-[10px] text-semantic-error">· Chưa đủ thông tin</span>
+                          )}
                         </div>
                       </div>
                       <button
@@ -239,11 +264,19 @@ export default function NewCasePage() {
           {files.length > 0 && (
             <div className="flex flex-col gap-2">
               {uploadStatus === 'uploading' && (
-                <div className="border border-border rounded-sm bg-surface p-3 space-y-2">
-                  <ProgressSkeleton />
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-primary" />
-                    <span className="text-[10px] text-text-secondary">Đang tải lên... {uploadProgress}%</span>
+                <div className="border border-brand-primary/30 rounded-sm bg-brand-light/5 p-3 space-y-2">
+                  <div className="relative h-1.5 bg-border rounded-full overflow-hidden">
+                    <div
+                      className="absolute inset-y-0 left-0 bg-brand-primary rounded-full transition-all duration-300 ease-out"
+                      style={{ width: `${uploadProgress ?? 0}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-primary shrink-0" />
+                      <span className="text-[10px] text-text-secondary">{uploadPhase || 'Đang xử lý...'}</span>
+                    </div>
+                    <span className="text-[10px] text-text-tertiary tabular-nums">{uploadProgress ?? 0}%</span>
                   </div>
                 </div>
               )}
@@ -253,25 +286,33 @@ export default function NewCasePage() {
                   <span className="text-[10px] text-text-secondary">Đang xử lý ảnh... Vui lòng đợi</span>
                 </div>
               )}
-              {uploadStatus === 'error' && (
+              {uploadError && (
                 <div className="border border-semantic-error/30 rounded-sm bg-semantic-error/5 p-3 flex items-center justify-between gap-2">
-                  <span className="text-[10px] text-semantic-error">Lỗi tải lên: {uploadError}</span>
-                  <button
-                    onClick={handleSubmit}
-                    className="text-[10px] px-2 py-1 bg-semantic-error text-white rounded-sm hover:opacity-90"
-                  >
-                    Thử lại
-                  </button>
+                  <span className="text-[10px] text-semantic-error">{uploadError}</span>
+                  {uploadStatus === 'error' && (
+                    <button
+                      onClick={() => { setUploadError(null); setUploadStatus('idle'); }}
+                      className="text-[10px] px-2 py-1 border border-semantic-error/30 text-semantic-error rounded-sm hover:bg-semantic-error/10 shrink-0"
+                    >
+                      Đóng
+                    </button>
+                  )}
                 </div>
               )}
               <button
                 onClick={handleSubmit}
-                disabled={submitting || uploadStatus === 'uploading' || uploadStatus === 'processing'}
-                className="w-full flex items-center justify-center gap-2 py-2.5 bg-brand-primary text-white text-xs font-semibold rounded-sm hover:opacity-90 transition-opacity disabled:opacity-60"
+                disabled={submitting || uploadStatus === 'uploading' || uploadStatus === 'processing' || !info?.pid || !info?.date}
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-brand-primary text-white text-xs font-semibold rounded-sm hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                title={!info?.pid ? 'Vui lòng nhập Mã BN' : !info?.date ? 'Vui lòng nhập Ngày chụp' : undefined}
               >
                 {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-                {submitting ? 'Đang tạo ca...' : `Tạo ${files.length} ca & chạy phân tích`}
+                {submitting ? 'Đang tạo ca...' : `Tạo ca & chạy phân tích`}
               </button>
+              {(!info?.pid || !info?.date) && !submitting && (
+                <p className="text-[10px] text-text-tertiary text-center">
+                  {!info?.pid ? '⚠ Chưa nhập Mã BN (bắt buộc)' : '⚠ Chưa nhập Ngày chụp (bắt buộc)'}
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -300,16 +341,20 @@ export default function NewCasePage() {
                   <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wider mb-3">Thông tin bệnh nhân</p>
                   <div className="grid grid-cols-3 gap-3">
                     {[
-                      { key: 'pid',  label: 'Mã BN',    placeholder: 'BN-2024-...' },
+                      { key: 'pid',  label: 'Mã BN',    placeholder: 'BN-2024-...', required: true },
                       { key: 'age',  label: 'Tuổi',     placeholder: 'e.g. 3' },
-                      { key: 'date', label: 'Ngày chụp', type: 'date' },
-                    ].map(({ key, label, placeholder, type }) => (
+                      { key: 'date', label: 'Ngày chụp', type: 'date', required: true },
+                    ].map(({ key, label, placeholder, type, required }) => (
                       <div key={key}>
-                        <label className="text-[10px] font-medium text-text-tertiary block mb-1">{label}</label>
+                        <label className="text-[10px] font-medium text-text-tertiary block mb-1">
+                          {label}{required && <span className="text-semantic-error ml-0.5">*</span>}
+                        </label>
                         <input type={type ?? 'text'} value={getInfoValue(key as keyof PatientInfo)}
                           onChange={e => updateInfo(activeFile.id, { [key]: e.target.value } as Partial<PatientInfo>)}
                           placeholder={placeholder}
-                          className="w-full text-xs border border-border rounded-sm px-2.5 py-1.5 bg-background focus:outline-none focus:border-brand-primary text-text-primary placeholder:text-text-tertiary"
+                          className={`w-full text-xs border rounded-sm px-2.5 py-1.5 bg-background focus:outline-none focus:border-brand-primary text-text-primary placeholder:text-text-tertiary ${
+                            required && !getInfoValue(key as keyof PatientInfo) ? 'border-semantic-error/50' : 'border-border'
+                          }`}
                         />
                       </div>
                     ))}

@@ -419,6 +419,48 @@ export async function getDocumentIngestionJob(jobId: string) {
   return apiCall<DocumentIngestionJobResponse>(`/api/documents/jobs/${jobId}`, { method: 'GET' });
 }
 
+export interface DocumentDetail {
+  id: string;
+  title: string;
+  version?: string;
+  source?: string;
+  status: string;
+  language?: string;
+  owner?: string;
+  age_group?: string;
+  effective_date?: string;
+  created_at?: string;
+  updated_at?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface DocumentChunk {
+  id: string;
+  chunk_index: number;
+  content: string;
+  created_at?: string;
+}
+
+/**
+ * GET /api/documents/:id - Get document detail with chunks
+ */
+export async function getDocumentDetail(id: string) {
+  return apiCall<{ document: DocumentDetail; chunks: DocumentChunk[]; chunk_count: number }>(
+    `/api/documents/${id}`,
+    { method: 'GET' }
+  );
+}
+
+/**
+ * GET /api/documents/:id/signed-url - Get signed URL for PDF viewing
+ */
+export async function getDocumentSignedUrl(id: string) {
+  return apiCall<{ success: true; signed_url: string; expires_in: number }>(
+    `/api/documents/${id}/signed-url`,
+    { method: 'GET' }
+  );
+}
+
 /**
  * DELETE /api/documents/:id - Delete a document and its chunks
  */
@@ -493,19 +535,51 @@ export async function getEpisodeDetail(episodeId: string) {
 /**
  * POST /api/episodes - Create new episode
  */
-export async function createEpisode(data: {
-  patient_ref: string;
-  age?: string;
-  gender?: string;
-  date: string;
-  symptoms?: string;
-  spo2?: string;
-  crp?: string;
-}) {
-  return apiCall<{ episode: Episode }>('/api/episodes', {
-    method: 'POST',
-    body: data,
-  });
+export async function createEpisode(
+  data: {
+    patient_ref: string;
+    age?: string;
+    gender?: string;
+    date: string;
+    symptoms?: string;
+    spo2?: string;
+    crp?: string;
+  },
+  imageFile?: File
+) {
+  const token = await getAuthToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const form = new FormData();
+  form.append('patient_ref', data.patient_ref);
+  if (data.age) form.append('age', data.age);
+  if (data.gender) form.append('gender', data.gender);
+  form.append('date', data.date);
+  if (data.symptoms) form.append('symptoms', data.symptoms);
+  if (data.spo2) form.append('spo2', data.spo2);
+  if (data.crp) form.append('crp', data.crp);
+  if (imageFile) form.append('image', imageFile);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/episodes`, {
+      method: 'POST',
+      headers,
+      body: form,
+    });
+    const json = await response.json();
+    if (!response.ok || !json.success) {
+      return { success: false as const, error: json.error || { code: 'NETWORK_ERROR', message: `HTTP ${response.status}` } };
+    }
+    return { success: true as const, ...json } as ApiResponse<{ episode: Episode }>;
+  } catch (err) {
+    return { success: false as const, error: { code: 'NETWORK_ERROR', message: (err as Error).message } };
+  }
+}
+
+export async function getEpisodeImageUrl(episodeId: string): Promise<{ url: string | null }> {
+  const res = await apiCall<{ url: string | null }>(`/api/episodes/${episodeId}/image-url`);
+  return { url: res.success ? (res as any).url : null };
 }
 
 /**
@@ -601,7 +675,34 @@ export async function getAiRunHistory(
 }
 
 /**
- * POST /api/drafts/:draft_id/approve — BS xác nhận + e-signature
+ * PATCH /api/ai-runs/drafts/:draft_id — lưu fields chỉnh sửa của bác sĩ vào DB
+ */
+export async function saveDraftFields(params: {
+  draft_id: string;
+  fields: DraftReportRow['fields'];
+  status?: 'edited' | 'under_review';
+}): Promise<{ ok: boolean; updated_at?: string; error?: string }> {
+  try {
+    const result = await apiCall<{ updated_at: string }>(
+      `/api/ai-runs/drafts/${params.draft_id}`,
+      {
+        method: 'PATCH',
+        body: {
+          fields: params.fields,
+          ...(params.status ? { status: params.status } : {}),
+        },
+      }
+    );
+    // Xóa cache để lần load tiếp sẽ lấy bản mới từ DB
+    invalidateCache(`draft_${params.draft_id}`);
+    return { ok: true, updated_at: result?.updated_at };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Lưu thất bại' };
+  }
+}
+
+/**
+ * POST /api/ai-runs/drafts/:draft_id/approve — BS xác nhận + e-signature
  */
 export async function approveDraft(params: {
   draft_id: string;
@@ -610,7 +711,7 @@ export async function approveDraft(params: {
 }): Promise<{ ok: boolean; approved_at?: string; error?: string }> {
   try {
     const result = await apiCall<{ approved_at: string }>(
-      `/api/drafts/${params.draft_id}/approve`,
+      `/api/ai-runs/drafts/${params.draft_id}/approve`,
       {
         method: 'POST',
         body: {
@@ -621,7 +722,7 @@ export async function approveDraft(params: {
     );
     return { ok: true, approved_at: result?.approved_at };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Approval failed' };
+    return { ok: false, error: err instanceof Error ? err.message : 'Xác nhận thất bại' };
   }
 }
 

@@ -108,6 +108,49 @@ function getDocumentSourceArtifact(document: {
   return null;
 }
 
+const KNOWLEDGE_DOCS_BUCKET = 'knowledge-docs';
+
+/** Possible Storage object keys for a document PDF (first match wins). */
+function storagePathCandidates(documentId: string, meta: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const push = (p?: string | null) => {
+    if (typeof p === 'string' && p.trim().length > 0) out.push(p.trim());
+  };
+
+  push(meta.storage_path as string);
+
+  const orig = meta.source_artifact_original_name;
+  if (typeof orig === 'string' && orig.trim()) {
+    push(`downloads/${sanitizeArtifactName(orig)}`);
+  }
+
+  const artifactPath = meta.source_artifact_path;
+  if (typeof artifactPath === 'string' && artifactPath.toLowerCase().endsWith('.pdf')) {
+    const base = path.basename(artifactPath.replace(/\\/g, '/'));
+    if (base) push(`downloads/${sanitizeArtifactName(base)}`);
+  }
+
+  push(`documents/${documentId}.pdf`);
+
+  return [...new Set(out)];
+}
+
+async function createSignedUrlFirstMatch(
+  documentId: string,
+  meta: Record<string, unknown>
+): Promise<{ signedUrl: string; storagePath: string } | null> {
+  const candidates = storagePathCandidates(documentId, meta);
+  for (const storagePath of candidates) {
+    const { data, error } = await supabase.storage
+      .from(KNOWLEDGE_DOCS_BUCKET)
+      .createSignedUrl(storagePath, 3600);
+    if (!error && data?.signedUrl) {
+      return { signedUrl: data.signedUrl, storagePath };
+    }
+  }
+  return null;
+}
+
 async function removeManagedArtifact(document: {
   metadata?: Record<string, unknown> | null;
 }): Promise<void> {
@@ -251,6 +294,122 @@ router.get('/', authenticateJWT, async (req, res) => {
 });
 
 /**
+/**
+ * GET /api/documents/:id/pdf
+ * Proxy the original PDF from Storage — same-origin, avoids cross-origin iframe issues.
+ */
+router.get('/:id/pdf', authenticateJWT, async (req, res) => {
+  try {
+    const role = getAuthenticatedRole(req);
+    const id = requireDocumentId(req, res);
+    if (!id) return;
+
+    const allowedRoles = ['admin', 'clinician', 'radiologist', 'researcher'];
+    if (!allowedRoles.includes(role)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const { data: doc, error: docErr } = await supabase
+      .from('documents')
+      .select('metadata, title')
+      .eq('id', id)
+      .single();
+
+    if (docErr || !doc) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+
+    const meta = (doc.metadata as Record<string, unknown> | null) ?? {};
+    const resolved = await createSignedUrlFirstMatch(id, meta);
+
+    if (!resolved) {
+      return res.status(404).json({ error: 'No storage file', message: 'File PDF chưa có trên Storage' });
+    }
+
+    // Download from Storage and pipe to client (same-origin)
+    const fetchRes = await fetch(resolved.signedUrl);
+    if (!fetchRes.ok) {
+      return res.status(502).json({ error: 'Storage fetch failed', message: `HTTP ${fetchRes.status}` });
+    }
+
+    const title = (doc.title as string | null) ?? 'document';
+    const safeTitle = title.replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_').slice(0, 80);
+
+    const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:3001';
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${safeTitle}.pdf"`);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    // Allow the web app to embed this PDF in an iframe (override Helmet's frame-ancestors 'self')
+    res.setHeader('Content-Security-Policy', `frame-ancestors 'self' ${corsOrigin}`);
+    res.removeHeader('X-Frame-Options');
+
+    const contentLength = fetchRes.headers.get('content-length');
+    if (contentLength) res.setHeader('Content-Length', contentLength);
+
+    if (fetchRes.body) {
+      const { Readable } = await import('stream');
+      Readable.fromWeb(fetchRes.body as any).pipe(res);
+    } else {
+      const buf = await fetchRes.arrayBuffer();
+      res.end(Buffer.from(buf));
+    }
+  } catch (err) {
+    logger.error('PDF proxy error', { error: err });
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+});
+
+/**
+ * GET /api/documents/:id/signed-url
+ * Generate a short-lived signed URL for viewing the original PDF from Storage
+ */
+router.get('/:id/signed-url', authenticateJWT, async (req, res) => {
+  try {
+    const role = getAuthenticatedRole(req);
+    const id = requireDocumentId(req, res);
+    if (!id) return;
+
+    const allowedRoles = ['admin', 'clinician', 'radiologist', 'researcher'];
+    if (!allowedRoles.includes(role)) {
+      return res.status(403).json({ error: 'Forbidden', message: 'Insufficient permissions' });
+    }
+
+    const { data: doc, error: docErr } = await supabase
+      .from('documents')
+      .select('metadata')
+      .eq('id', id)
+      .single();
+
+    if (docErr || !doc) {
+      return res.status(404).json({ error: 'Not found', message: 'Document not found' });
+    }
+
+    const meta = (doc.metadata as Record<string, unknown> | null) ?? {};
+
+    const resolved = await createSignedUrlFirstMatch(id, meta);
+    if (!resolved) {
+      return res.status(404).json({
+        error: 'No storage file',
+        message: 'Không tìm thấy file PDF trên Storage cho tài liệu này',
+      });
+    }
+
+    const previousPath = meta.storage_path as string | undefined;
+    if (previousPath !== resolved.storagePath) {
+      const nextMeta = { ...meta, storage_path: resolved.storagePath };
+      void supabase.from('documents').update({ metadata: nextMeta }).eq('id', id);
+    }
+
+    return res.json({ success: true, signed_url: resolved.signedUrl, expires_in: 3600 });
+  } catch (err) {
+    logger.error('Signed URL error', { error: err });
+    return res.status(500).json({ error: 'Internal server error', message: err instanceof Error ? err.message : 'Unknown error' });
+  }
+});
+
+/**
  * GET /api/documents/:id
  * Get document detail with chunks
  */
@@ -263,11 +422,12 @@ router.get('/:id', authenticateJWT, async (req, res) => {
       return;
     }
 
-    // Only admin can access
-    if (role !== 'admin') {
+    // All authenticated clinical roles can view document details
+    const allowedRoles = ['admin', 'clinician', 'radiologist', 'researcher'];
+    if (!allowedRoles.includes(role)) {
       return res.status(403).json({
         error: 'Forbidden',
-        message: 'Only admin can access document management',
+        message: 'Insufficient permissions to access document details',
       });
     }
 
@@ -307,6 +467,7 @@ router.get('/:id', authenticateJWT, async (req, res) => {
     });
 
     res.json({
+      success: true,
       document,
       chunks: chunks || [],
       chunk_count: chunks?.length || 0,

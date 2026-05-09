@@ -8,6 +8,7 @@ interface ReporterAgentRequest {
   template_id: string;
   detection: DetectionPayload;
   clinical_data?: Record<string, any>;
+  created_by?: string;
 }
 
 interface GuidelineSnippet {
@@ -204,22 +205,29 @@ Hãy điền thông tin vào các trường báo cáo. Trả lời theo định 
 
       // Step 4: Save draft to database
       // Use NULL for template_id when using the built-in fallback (non-UUID value)
-      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.template_id);
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const isUUID = UUID_RE.test(request.template_id);
+      const createdBy = UUID_RE.test(request.created_by ?? '')
+        ? request.created_by
+        : '70f081ff-734b-46f7-ba5c-94ffc9fb6e28'; // dev fallback radiologist
       const draftId = crypto.randomUUID();
+
+      // NOTE: table primary key column is `id` (not `draft_id`); `model_version` column does not exist.
       const { error: insertError } = await supabase
         .from('draft_reports')
         .insert({
-          draft_id: draftId,
+          id: draftId,
           episode_id: request.episode_id,
           template_id: isUUID ? request.template_id : null,
           fields: fields,
           status: 'draft',
-          model_version: request.detection.model_version || process.env.OLLAMA_MODEL || 'qwen2.5:7b',
+          created_by: createdBy,
           updated_at: new Date().toISOString(),
         });
 
       if (insertError) {
-        logger.error('Draft save error', { error: insertError.message });
+        logger.error('Draft save error — insert failed, aborting', { error: insertError.message, draftId });
+        throw new Error(`Không thể lưu nháp báo cáo vào database: ${insertError.message}`);
       }
 
       const duration = Date.now() - startTime;

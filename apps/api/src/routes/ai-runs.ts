@@ -1,15 +1,19 @@
 /**
  * AI Runs Routes
  *
- * GET  /api/ai-runs?episode_id=&type=&limit=  – list runs (metadata)
- * GET  /api/ai-runs/latest?episode_id=&type=  – latest completed run with full content
- * GET  /api/ai-runs/:run_id                   – single run by ID
- * POST /api/ai-runs/:run_id/abort             – mark a streaming run aborted (client disconnect)
+ * GET   /api/ai-runs?episode_id=&type=&limit=  – list runs (metadata)
+ * GET   /api/ai-runs/latest?episode_id=&type=  – latest completed run with full content
+ * GET   /api/ai-runs/:run_id                   – single run by ID
+ * POST  /api/ai-runs/:run_id/abort             – mark a streaming run aborted (client disconnect)
  *
- * GET  /api/drafts                            – list all drafts (paginated)
- * GET  /api/drafts/latest?episode_id=         – latest draft for episode
- * GET  /api/drafts/:draft_id                  – get draft with signature info
- * POST /api/drafts/:draft_id/approve          – approve draft + e-signature
+ * GET   /api/ai-runs/drafts                    – list all drafts (paginated)
+ * GET   /api/ai-runs/drafts/latest?episode_id= – latest draft for episode
+ * GET   /api/ai-runs/drafts/:draft_id          – get draft with signature info
+ * PATCH /api/ai-runs/drafts/:draft_id          – update draft fields (auto-save / manual save)
+ * POST  /api/ai-runs/drafts/:draft_id/approve  – approve draft + e-signature
+ *
+ * IMPORTANT: All /drafts/* routes must be declared BEFORE /:run_id to avoid
+ *            Express matching "drafts" as a run_id param.
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -58,40 +62,22 @@ router.get('/latest', authenticateJWT, async (req: Request, res: Response) => {
     maxAgeMs
   );
 
-  // Return 200+null (not 404) so frontend doesn't get console noise on cache miss
   return res.json({ success: true, run: run ?? null });
 });
 
-// ── GET /api/ai-runs/:run_id ────────────────────────────────────────────────
-
-router.get('/:run_id', authenticateJWT, async (req: Request, res: Response) => {
-  const { run_id } = req.params;
-
-  const run = await getRunById(run_id);
-  if (!run) {
-    return res.status(404).json({ success: false, error: 'Run not found' });
-  }
-
-  return res.json({ success: true, run });
-});
-
-// ── POST /api/ai-runs/:run_id/abort ────────────────────────────────────────
-
-router.post('/:run_id/abort', authenticateJWT, async (req: Request, res: Response) => {
-  const { run_id } = req.params;
-  await abortRun(run_id);
-  return res.json({ success: true });
-});
+// ═══════════════════════════════════════════════════════════════════════════
+// DRAFT ROUTES — must be declared BEFORE /:run_id to avoid param conflict
+// ═══════════════════════════════════════════════════════════════════════════
 
 // ── GET /api/drafts?status=&limit=&offset= ────────────────────────────────
-// List all drafts across episodes (for the reports page)
+
 router.get('/drafts', authenticateJWT, async (req: Request, res: Response) => {
   const { status, limit = '50', offset = '0' } = req.query as Record<string, string>;
 
   let query = supabase
     .from('draft_reports')
     .select(`
-      draft_id, episode_id, template_id, status, model_version,
+      id, episode_id, template_id, status,
       created_by, approved_by, created_at, updated_at
     `, { count: 'exact' })
     .order('updated_at', { ascending: false })
@@ -108,7 +94,8 @@ router.get('/drafts', authenticateJWT, async (req: Request, res: Response) => {
     return res.status(500).json({ success: false, error: error.message });
   }
 
-  return res.json({ success: true, drafts: data ?? [], total: count ?? 0 });
+  const drafts = (data ?? []).map(r => ({ ...r, draft_id: r.id }));
+  return res.json({ success: true, drafts, total: count ?? 0 });
 });
 
 // ── GET /api/drafts/latest?episode_id= ────────────────────────────────────
@@ -123,7 +110,7 @@ router.get('/drafts/latest', authenticateJWT, async (req: Request, res: Response
   const { data, error } = await supabase
     .from('draft_reports')
     .select(`
-      draft_id, episode_id, template_id, fields, status, model_version,
+      id, episode_id, template_id, fields, status,
       created_by, approved_by, created_at, updated_at
     `)
     .eq('episode_id', episode_id)
@@ -135,7 +122,9 @@ router.get('/drafts/latest', authenticateJWT, async (req: Request, res: Response
   if (error && error.code !== 'PGRST116') {
     logger.warn('[drafts/latest] query error', { error: error.message });
   }
-  return res.json({ success: true, draft: data ?? null });
+
+  const draft = data ? { ...data, draft_id: data.id } : null;
+  return res.json({ success: true, draft });
 });
 
 // ── GET /api/drafts/:draft_id ───────────────────────────────────────────────
@@ -146,17 +135,49 @@ router.get('/drafts/:draft_id', authenticateJWT, async (req: Request, res: Respo
   const { data, error } = await supabase
     .from('draft_reports')
     .select(`
-      draft_id, episode_id, template_id, fields, status, model_version,
+      id, episode_id, template_id, fields, status,
       created_by, approved_by, created_at, updated_at
     `)
-    .eq('draft_id', draft_id)
+    .eq('id', String(draft_id))
     .single();
 
   if (error || !data) {
     return res.status(404).json({ success: false, error: 'Draft not found' });
   }
 
-  return res.json({ success: true, draft: data });
+  return res.json({ success: true, draft: { ...data, draft_id: data.id } });
+});
+
+// ── PATCH /api/drafts/:draft_id ─────────────────────────────────────────────
+
+router.patch('/drafts/:draft_id', authenticateJWT, async (req: Request, res: Response) => {
+  const { draft_id } = req.params;
+  const { fields, status } = req.body as {
+    fields?: Array<{ field_id: string; label?: string; value: unknown; source?: string; status?: string }>;
+    status?: 'draft' | 'edited' | 'under_review';
+  };
+
+  if (!fields && !status) {
+    return res.status(400).json({ success: false, error: 'fields or status required' });
+  }
+
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (fields !== undefined) patch.fields = fields;
+  if (status !== undefined) patch.status = status;
+  if (fields !== undefined && !status) patch.status = 'edited';
+
+  const { error } = await supabase
+    .from('draft_reports')
+    .update(patch)
+    .eq('id', String(draft_id));
+
+  if (error) {
+    logger.warn('[drafts] patch failed', { draft_id, error: error.message });
+    return res.status(500).json({ success: false, error: error.message });
+  }
+
+  logger.info('[drafts] patched', { draft_id, keys: Object.keys(patch) });
+  return res.json({ success: true, draft_id, updated_at: patch.updated_at });
 });
 
 // ── POST /api/drafts/:draft_id/approve ─────────────────────────────────────
@@ -167,7 +188,7 @@ router.post('/drafts/:draft_id/approve', authenticateJWT, async (req: Request, r
 
   const {
     approval_note,
-    signature_name,    // full name typed by doctor
+    signature_name,
   } = req.body as {
     approval_note?: string;
     signature_name?: string;
@@ -176,7 +197,7 @@ router.post('/drafts/:draft_id/approve', authenticateJWT, async (req: Request, r
   if (!signature_name?.trim()) {
     return res.status(400).json({
       success: false,
-      error: 'signature_name required — doctor must type their full name to confirm',
+      error: 'signature_name required',
     });
   }
 
@@ -212,6 +233,31 @@ router.post('/drafts/:draft_id/approve', authenticateJWT, async (req: Request, r
     approved_at: signature.timestamp,
     signature,
   });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CATCH-ALL RUN ROUTES — must be declared AFTER all /drafts/* routes
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── GET /api/ai-runs/:run_id ────────────────────────────────────────────────
+
+router.get('/:run_id', authenticateJWT, async (req: Request, res: Response) => {
+  const { run_id } = req.params;
+
+  const run = await getRunById(run_id);
+  if (!run) {
+    return res.status(404).json({ success: false, error: 'Run not found' });
+  }
+
+  return res.json({ success: true, run });
+});
+
+// ── POST /api/ai-runs/:run_id/abort ────────────────────────────────────────
+
+router.post('/:run_id/abort', authenticateJWT, async (req: Request, res: Response) => {
+  const { run_id } = req.params;
+  await abortRun(run_id);
+  return res.json({ success: true });
 });
 
 export default router;

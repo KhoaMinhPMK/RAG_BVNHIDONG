@@ -283,7 +283,7 @@ export async function approveDraft(params: ApproveParams): Promise<{ ok: boolean
         signature_data:  params.signature,
         updated_at:      new Date().toISOString(),
       })
-      .eq('draft_id', params.draft_id)
+      .eq('id', params.draft_id)
       .in('status', ['draft', 'under_review', 'edited']); // only approvable states
 
     if (error) return { ok: false, error: error.message };

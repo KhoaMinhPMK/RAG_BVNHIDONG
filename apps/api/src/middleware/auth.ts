@@ -44,7 +44,7 @@ export async function authenticateJWT(
   try {
     // DEV BYPASS: Skip auth in development mode when SKIP_AUTH=true
     if (process.env.NODE_ENV === 'development' && process.env.SKIP_AUTH === 'true') {
-      req.userId = 'dev-user-id';
+      req.userId = '70f081ff-734b-46f7-ba5c-94ffc9fb6e28'; // radiologist@bvnhidong.vn
       req.userRole = 'clinician' as Role;
       req.user = {
         id: 'dev-user-id',

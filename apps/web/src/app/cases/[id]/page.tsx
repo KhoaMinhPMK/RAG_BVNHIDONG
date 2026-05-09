@@ -10,11 +10,12 @@ import {
   User, Calendar, Stethoscope,
   Loader2, RefreshCw, FlaskConical,
   Maximize2, Minimize2, Brain, Eye, Printer, Database, Save, Download,
+  Cpu, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { PageTransition } from '@/components/ui/page-transition';
 import { DetectionSkeleton } from '@/components/ui/loading-skeleton';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
-import { getEpisodeDetail, getLatestAiRun, getLatestDraft, invalidateDraftCache } from '@/lib/api/client';
+import { getEpisodeDetail, getEpisodeImageUrl, getLatestAiRun, getLatestDraft, invalidateDraftCache, saveDraftFields, approveDraft } from '@/lib/api/client';
 import type { AiRunRow } from '@/lib/api/client';
 import { CAEDock } from '@/components/cae/CAEDock';
 import { BlockRenderer } from '@/components/cae/BlockRenderer';
@@ -54,45 +55,7 @@ interface PcxrSample {
   annotations: PcxrAnnotation[];
 }
 
-// ─── Real PCXR sample data ─────────────────────────────────────────────────
-const PCXR_SAMPLES: PcxrSample[] = [
-  { idx: 0, key: '01', imageId: 'imgid_336', imgSrc: '/pcxr/01_imgid_336_3629dcfcfeecccbae6c41839616c5089.png', dim: 1280,
-    annotations: [{ id: 231, categoryId: 30, category: 'Peribronchovascular interstitial opacity', bbox: [726.75, 482.475, 160.589, 178.698] }] },
-  { idx: 1, key: '02', imageId: 'imgid_70',  imgSrc: '/pcxr/02_imgid_70_0a4a406f3616736f9564f7a0f0c7c807.png', dim: 1280,
-    annotations: [{ id: 56,  categoryId: 18, category: 'Expanded edges of the anterior ribs',        bbox: [304.643, 390.031, 114.334, 110.068] }] },
-  { idx: 2, key: '03', imageId: 'imgid_856', imgSrc: '/pcxr/03_imgid_856_8c9dc1aaf0c0782f2152ee54a23eed5d.png', dim: 1280,
-    annotations: [
-      { id: 543, categoryId: 35, category: 'Reticulonodular opacity', bbox: [259.542, 254.787, 283.894, 547.489] },
-      { id: 544, categoryId: 35, category: 'Reticulonodular opacity', bbox: [767.847, 275.064, 246.042, 515.045] },
-    ] },
-  { idx: 3, key: '04', imageId: 'imgid_750', imgSrc: '/pcxr/04_imgid_750_7ef3f0f3b3455abf5cb0d6d7e64c5275.png', dim: 1280,
-    annotations: [{ id: 485, categoryId: 30, category: 'Peribronchovascular interstitial opacity', bbox: [803.467, 353.957, 152.286, 357.054] }] },
-  { idx: 4, key: '05', imageId: 'imgid_660', imgSrc: '/pcxr/05_imgid_660_6ed015598fa61f9a4c28a94cfe39ac75.png', dim: 1280,
-    annotations: [
-      { id: 446, categoryId: 30, category: 'Peribronchovascular interstitial opacity', bbox: [506.822, 436.627, 95.336, 321.313] },
-      { id: 447, categoryId: 30, category: 'Peribronchovascular interstitial opacity', bbox: [799.359, 534.588, 116.231, 239.025] },
-    ] },
-  { idx: 5, key: '06', imageId: 'imgid_416', imgSrc: '/pcxr/06_imgid_416_42bcf79a642d33560942207cbbcccf45.png', dim: 1280,
-    annotations: [{ id: 283, categoryId: 8,  category: 'Cardiomegaly',                              bbox: [444.058, 427.409, 556.654, 367.304] }] },
-  { idx: 6, key: '07', imageId: 'imgid_317', imgSrc: '/pcxr/07_imgid_317_32d2df88024edd4fac0ee963add34732.png', dim: 1280,
-    annotations: [
-      { id: 213, categoryId: 35, category: 'Reticulonodular opacity', bbox: [438.248, 579.498, 71.352,  75.331] },
-      { id: 214, categoryId: 35, category: 'Reticulonodular opacity', bbox: [458.068, 427.845, 70.361, 100.111] },
-    ] },
-  { idx: 7, key: '08', imageId: 'imgid_284', imgSrc: '/pcxr/08_imgid_284_2dd5899b11661cf3b50c0676eae17b64.png', dim: 1280,
-    annotations: [{ id: 185, categoryId: 6,  category: 'Bronchial thickening',                      bbox: [457.859, 532.002, 76.417, 65.221] }] },
-  { idx: 8, key: '09', imageId: 'imgid_1300',imgSrc: '/pcxr/09_imgid_1300_d6abc594cf9b5df05fb2c16195bc9f46.png', dim: 1280,
-    annotations: [
-      { id: 846, categoryId: 8,  category: 'Cardiomegaly',                              bbox: [404.549, 418.981, 535.831, 345.559] },
-      { id: 847, categoryId: 30, category: 'Peribronchovascular interstitial opacity', bbox: [281.871, 313.198, 208.692, 394.925] },
-      { id: 848, categoryId: 30, category: 'Peribronchovascular interstitial opacity', bbox: [728.868, 318.84,  256.635, 389.283] },
-    ] },
-  { idx: 9, key: '10', imageId: 'imgid_96',  imgSrc: '/pcxr/10_imgid_96_0e4a528a45ba9be08e9cf230b6afd3ff.png', dim: 1280,
-    annotations: [
-      { id: 67, categoryId: 30, category: 'Peribronchovascular interstitial opacity', bbox: [431.018, 427.389, 109.761, 160.129] },
-      { id: 68, categoryId: 35, category: 'Reticulonodular opacity',                  bbox: [375.084, 461.403, 42.069,  130.23]  },
-    ] },
-];
+// PCXR_SAMPLES removed — real images are now fetched from Supabase Storage
 
 // Category color palette (deterministic by categoryId)
 const CAT_COLORS = [
@@ -105,8 +68,6 @@ const CAT_COLORS = [
 ] as const;
 
 function catColor(categoryId: number) { return CAT_COLORS[categoryId % CAT_COLORS.length]; }
-function mockScore(annId: number): number { return Math.min(0.95, 0.65 + (annId % 29) / 90); }
-
 // Category short names
 const CAT_SHORT: Record<number, string> = {
   6: 'Dày thành phế quản', 8: 'Tim to', 18: 'Xương sườn trước giãn',
@@ -123,21 +84,7 @@ const DEFAULT_CASE_INFO: CaseInfo = {
   spo2: '—', crp: '—',
 };
 
-// ─── Episode to Sample mapping ─────────────────────────────────────────────
-// Maps episode_id → PCXR sample index (0-9)
-// In production, this will be fetched from Supabase based on episode_id
-const EPISODE_TO_SAMPLE: Record<string, number> = {
-  'EP-2024-010': 0, // imgid_336 — Peribronchovascular interstitial opacity
-  'EP-2024-009': 1, // imgid_70  — Expanded edges of the anterior ribs
-  'EP-2024-008': 2, // imgid_856 — Reticulonodular opacity (bilateral)
-  'EP-2024-007': 3, // imgid_750 — Peribronchovascular interstitial opacity
-  'EP-2024-006': 4, // imgid_660 — Peribronchovascular interstitial opacity (2)
-  'EP-2024-005': 5, // imgid_416 — Cardiomegaly
-  'EP-2024-004': 6, // imgid_317 — Reticulonodular opacity (2)
-  'EP-2024-003': 7, // imgid_284 — Bronchial thickening
-  'EP-2024-002': 8, // imgid_1300 — Cardiomegaly + Peribronchovascular (3 findings)
-  'EP-2024-001': 9, // imgid_96  — Peribronchovascular + Reticulonodular
-};
+// EPISODE_TO_SAMPLE removed — real images fetched from API
 
 // ─── Panel width presets ────────────────────────────────────────────────────
 const PANEL_WIDTHS: Record<PanelMode, number> = { wide: 54, balanced: 44, compact: 30 };
@@ -151,13 +98,13 @@ function streamText(text: string, onUpdate: (s: string) => void, onDone: () => v
   }
   setTimeout(tick, 180);
 }
-function buildDetectionPayload(sample: PcxrSample) {
+function buildDetectionPayload(episodeId: string, annotations: PcxrAnnotation[]) {
   return {
-    image_id: sample.imageId,
-    detections: sample.annotations.map(annotation => ({
+    image_id: episodeId,
+    detections: annotations.map(annotation => ({
       bbox: annotation.bbox,
       label: annotation.category,
-      score: mockScore(annotation.id),
+      score: 0.75,
     })),
   };
 }
@@ -285,19 +232,13 @@ function extractNarrativeHighlights(text: string, limit = 3) {
   return sentences.slice(0, limit);
 }
 
-function resolveFindingIndex(sample: PcxrSample, findingId: string): number | null {
-  const directMatch = sample.annotations.findIndex(annotation => String(annotation.id) === findingId);
-  if (directMatch >= 0) {
-    return directMatch;
-  }
-
-  const normalizedFindingId = findingId.toLowerCase();
-  const labelMatch = sample.annotations.findIndex(annotation => {
-    const longLabel = annotation.category.toLowerCase();
-    const shortLabel = catShort(annotation.categoryId, annotation.category).toLowerCase();
-    return longLabel.includes(normalizedFindingId) || shortLabel.includes(normalizedFindingId);
-  });
-
+function resolveFindingIndex(annotations: PcxrAnnotation[], findingId: string): number | null {
+  const directMatch = annotations.findIndex(a => String(a.id) === findingId);
+  if (directMatch >= 0) return directMatch;
+  const norm = findingId.toLowerCase();
+  const labelMatch = annotations.findIndex(a =>
+    a.category.toLowerCase().includes(norm) || catShort(a.categoryId, a.category).toLowerCase().includes(norm)
+  );
   return labelMatch >= 0 ? labelMatch : null;
 }
 
@@ -509,13 +450,23 @@ function XrayViewport({
           )}
 
           {/* Real X-ray image */}
-          <img
-            src={sample.imgSrc}
-            alt={sample.imageId}
-            className="absolute inset-0 w-full h-full"
-            style={{ objectFit: 'cover' }}
-            draggable={false}
-          />
+          {sample.imgSrc ? (
+            <img
+              src={sample.imgSrc}
+              alt={sample.imageId}
+              className="absolute inset-0 w-full h-full"
+              style={{ objectFit: 'cover' }}
+              draggable={false}
+            />
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-zinc-600">
+              <svg className="w-12 h-12 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <rect x="3" y="3" width="18" height="18" rx="2" strokeWidth="1.5"/>
+                <path d="M3 9l4-4 4 4 4-4 4 4" strokeWidth="1.5"/>
+              </svg>
+              <span className="text-xs opacity-50">Chưa có ảnh X-quang</span>
+            </div>
+          )}
 
           {/* Bounding boxes — % of the square, matching the pixel coords in dim×dim space */}
           {sample.annotations.map((ann, i) => {
@@ -554,7 +505,7 @@ function XrayViewport({
                   }} />
                 ))}
                 <div className={`absolute -top-5 left-0 px-1.5 py-0.5 rounded-sm text-[9px] font-bold whitespace-nowrap transition-opacity ${col.tag} ${isHot ? 'opacity-100' : 'opacity-65'}`}>
-                  {catShort(ann.categoryId, ann.category)} · {(mockScore(ann.id) * 100).toFixed(0)}%
+                  {catShort(ann.categoryId, ann.category)} · {(0.75 * 100).toFixed(0)}%
                 </div>
               </div>
             );
@@ -572,11 +523,185 @@ function XrayViewport({
 }
 
 // ─── Image panel ───────────────────────────────────────────────────────────
+// ── CXR AI Analysis Panel ────────────────────────────────────────────────────
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
+
+interface CxrPrediction { label: string; probability: number; }
+interface CxrResult {
+  top_finding: string;
+  predictions: CxrPrediction[];
+  heatmaps: Record<string, string>; // base64 JPEG
+}
+
+function CxrAnalysisPanel({ episodeId, imgSrc }: { episodeId: string; imgSrc: string }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  const [result, setResult] = useState<CxrResult | null>(null);
+  const [error, setError] = useState('');
+  const [heatmapTab, setHeatmapTab] = useState('Pneumonia');
+  const [expanded, setExpanded] = useState(false);
+
+  // Auto-load existing analysis results on mount
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_BASE}/api/cxr/status/${episodeId}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(data => {
+        if (cancelled) return;
+        if (data.success && data.status === 'completed' && data.results) {
+          const r = data.results as CxrResult;
+          setResult(r);
+          setHeatmapTab(Object.keys(r.heatmaps ?? {})[0] ?? 'Pneumonia');
+          setState('done');
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [episodeId]);
+
+  const analyze = async () => {
+    if (!imgSrc) { setError('Chưa có ảnh X-quang'); setState('error'); return; }
+    setState('loading');
+    setError('');
+    try {
+      const imgRes = await fetch(imgSrc);
+      if (!imgRes.ok) throw new Error('Không tải được ảnh');
+      const blob = await imgRes.blob();
+
+      const form = new FormData();
+      form.append('image', blob, 'xray.png');
+
+      const res = await fetch(`${API_BASE}/api/cxr/analyze/${episodeId}`, {
+        method: 'POST',
+        body: form,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json() as CxrResult;
+      setResult(data);
+      setHeatmapTab(Object.keys(data.heatmaps)[0] ?? 'Pneumonia');
+      setState('done');
+      setExpanded(true);
+    } catch (e) {
+      setError(String(e));
+      setState('error');
+    }
+  };
+
+  const LABEL_VI: Record<string, string> = {
+    'Consolidation': 'Đông đặc',
+    'Atelectasis': 'Xẹp phổi',
+    'Effusion': 'Tràn dịch',
+    'Pneumonia': 'Viêm phổi',
+    'Lung Opacity': 'Mờ phổi',
+    'Infiltration': 'Thâm nhiễm',
+    'No Finding': 'Bình thường',
+  };
+
+  return (
+    <div className="border-t border-zinc-800 bg-zinc-900">
+      {/* Header row */}
+      <div className="flex items-center justify-between px-2.5 py-1.5">
+        <div className="flex items-center gap-1.5">
+          <Cpu className="w-3 h-3 text-indigo-400" />
+          <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wide">AI X-quang</span>
+          {state === 'done' && result && (
+            <span className="text-[10px] bg-indigo-900/60 text-indigo-300 px-1.5 py-0.5 rounded font-mono">
+              {LABEL_VI[result.top_finding] ?? result.top_finding}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
+          {state === 'done' && (
+            <button
+              onClick={() => setExpanded(v => !v)}
+              className="text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+          )}
+          <button
+            onClick={analyze}
+            disabled={state === 'loading'}
+            className="flex items-center gap-1 px-2 py-0.5 text-[10px] bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-sm transition-colors"
+          >
+            {state === 'loading'
+              ? <><Loader2 className="w-3 h-3 animate-spin" /> Đang phân tích…</>
+              : state === 'done'
+              ? <><RefreshCw className="w-3 h-3" /> Chạy lại</>
+              : <><Cpu className="w-3 h-3" /> Phân tích</>}
+          </button>
+        </div>
+      </div>
+
+      {/* Error */}
+      {state === 'error' && (
+        <div className="px-3 pb-2 text-[10px] text-red-400">{error}</div>
+      )}
+
+      {/* Results */}
+      {state === 'done' && result && expanded && (
+        <div className="px-2.5 pb-3 flex flex-col gap-2">
+          {/* Probability bars */}
+          <div className="flex flex-col gap-1">
+            {result.predictions.slice(0, 5).map(p => (
+              <div key={p.label} className="flex items-center gap-2">
+                <span className="text-[9px] text-zinc-400 w-20 shrink-0 truncate">{LABEL_VI[p.label] ?? p.label}</span>
+                <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${Math.round(p.probability * 100)}%`,
+                      backgroundColor: p.probability > 0.6 ? '#f97316' : p.probability > 0.3 ? '#eab308' : '#6b7280',
+                    }}
+                  />
+                </div>
+                <span className="text-[9px] text-zinc-400 w-7 text-right shrink-0">
+                  {Math.round(p.probability * 100)}%
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Heatmap tabs */}
+          {Object.keys(result.heatmaps).length > 0 && (
+            <div>
+              <div className="flex gap-1 mb-1.5">
+                {Object.keys(result.heatmaps).map(cls => (
+                  <button
+                    key={cls}
+                    onClick={() => setHeatmapTab(cls)}
+                    className={`text-[9px] px-1.5 py-0.5 rounded-sm transition-colors ${
+                      heatmapTab === cls
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    {LABEL_VI[cls] ?? cls}
+                  </button>
+                ))}
+              </div>
+              {result.heatmaps[heatmapTab] && (
+                <img
+                  src={`data:image/jpeg;base64,${result.heatmaps[heatmapTab]}`}
+                  alt={`Heatmap ${heatmapTab}`}
+                  className="w-full rounded-sm border border-zinc-700"
+                />
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ImagePanel({
-  widthPct, sample, caseInfo,
+  widthPct, sample, caseInfo, episodeId,
   hoveredIdx, onHoverIdx, focusedIdx, onFocusIdx, onFullscreen, onCollapse,
 }: {
-  widthPct: number; sample: PcxrSample; caseInfo: CaseInfo;
+  widthPct: number; sample: PcxrSample; caseInfo: CaseInfo; episodeId: string;
   hoveredIdx: number | null; onHoverIdx: (i: number | null) => void;
   focusedIdx: number | null; onFocusIdx: (i: number | null) => void;
   onFullscreen: () => void;
@@ -621,6 +746,9 @@ function ImagePanel({
         <div className="flex-1 min-h-0">
           <XrayViewport sample={sample} hoveredIdx={hoveredIdx} onHoverIdx={onHoverIdx} focusedIdx={focusedIdx} onFocusIdx={onFocusIdx} />
         </div>
+
+        {/* CXR AI Analysis */}
+        <CxrAnalysisPanel episodeId={episodeId} imgSrc={sample.imgSrc} />
 
         {/* Annotation legend — fixed height below image */}
         {sample.annotations.length > 0 && (
@@ -717,7 +845,7 @@ function FullscreenViewer({ sample, caseInfo, hoveredIdx, onHoverIdx, onClose }:
               }`}>
               <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: col.dot }} />
               <span className="text-xs text-zinc-300">{catShort(ann.categoryId, ann.category)}</span>
-              <span className="text-[10px] font-mono text-zinc-500">{(mockScore(ann.id) * 100).toFixed(0)}%</span>
+              <span className="text-[10px] font-mono text-zinc-500">{(0.75 * 100).toFixed(0)}%</span>
             </button>
           );
         })}
@@ -769,7 +897,7 @@ function DetectionPanel({ sample, hoveredIdx, onHoverIdx, focusedIdx, onFocusIdx
         <div className="divide-y divide-border">
           {sample.annotations.map((ann, i) => {
             const col = catColor(ann.categoryId);
-            const score = mockScore(ann.id);
+            const score = 0.75;
             const isHot = hoveredIdx === i;
             const isFocused = focusedIdx === i;
             return (
@@ -914,7 +1042,7 @@ function ExplainPanel({
     onCitationsLoaded([]);
     onStructuredCitationsLoaded?.([]);
     reset();
-    await startExplain(episodeId, buildDetectionPayload(sample), { findingIds });
+    await startExplain(episodeId, buildDetectionPayload(episodeId, sample.annotations), { findingIds });
   };
 
   const handleCitationSelect = (citationId: string) => {
@@ -1170,6 +1298,10 @@ function DraftPanel({
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState(true);
   const [restoredDraftId, setRestoredDraftId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [signatureName, setSignatureName] = useState('');
   const fieldRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const findingIds = sample.annotations.map((annotation) => String(annotation.id));
   const {
@@ -1218,12 +1350,18 @@ function DraftPanel({
     }
   }, [streamedFields]);
 
-  // When a new draft stream completes, invalidate the draft cache so the next
-  // page-load restore will fetch the freshly saved version from the database.
+  // When a new draft stream completes: invalidate cache AND fetch the draft_id
+  // that the backend just saved — so the "Lưu" button can PATCH right away.
   useEffect(() => {
     if (hasStarted && !isStreaming && !error && streamedFields.length > 0) {
       invalidateDraftCache(episodeId);
+      if (!restoredDraftId) {
+        getLatestDraft(episodeId).then((saved) => {
+          if (saved?.draft_id) setRestoredDraftId(saved.draft_id);
+        });
+      }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasStarted, isStreaming, error, streamedFields.length, episodeId]);
 
   useEffect(() => {
@@ -1258,7 +1396,7 @@ function DraftPanel({
     invalidateDraftCache(episodeId);
     onCitationsLoaded([]);
     onStructuredCitationsLoaded?.([]);
-    await startDraft(episodeId, 'default', buildDetectionPayload(sample), { findingIds });
+    await startDraft(episodeId, 'default', buildDetectionPayload(episodeId, sample.annotations), { findingIds });
   };
 
   const handleCitationSelect = (citationId: string) => {
@@ -1303,7 +1441,7 @@ function DraftPanel({
       indication:     fallback(pickFieldValue('lý do', 'chief_complaint')),
       vitals:         fallback(pickFieldValue('sinh hiệu', 'vitals')),
       labs:           fallback(pickFieldValue('xét nghiệm', 'labs')),
-      findings:       fallback(pickFieldValue('x-quang', 'detection', 'mô tả') || sample.annotations.map((a) => `${catShort(a.categoryId, a.category)} (${Math.round(mockScore(a.id) * 100)}%)`).join('; ')),
+      findings:       fallback(pickFieldValue('x-quang', 'detection', 'mô tả') || sample.annotations.map((a) => `${catShort(a.categoryId, a.category)} (${Math.round(0.75 * 100)}%)`).join('; ')),
       impression:     fallback(pickFieldValue('đánh giá', 'kết luận', 'impression')),
       recommendation: fallback(pickFieldValue('đề xuất', 'xử lý', 'recommend')),
       doctorNote:     fallback(pickFieldValue('ghi chú', 'note')),
@@ -1315,7 +1453,7 @@ function DraftPanel({
     const d = buildReportData(mode);
     const detections = sample.annotations.map((a) => ({
       label: catShort(a.categoryId, a.category),
-      confidence: `${Math.round(mockScore(a.id) * 100)}%`,
+      confidence: `${Math.round(0.75 * 100)}%`,
     }));
     const auditFields = fields.map((f) => ({
       label: f.label, source: f.source, status: f.status,
@@ -1353,7 +1491,7 @@ function DraftPanel({
     const detectionRows = sample.annotations.map((ann, i) => `
       <tr>
         <td>${i + 1}</td><td>${esc(catShort(ann.categoryId, ann.category))}</td>
-        <td>${Math.round(mockScore(ann.id) * 100)}%</td><td>[${ann.bbox.join(', ')}]</td>
+        <td>${Math.round(0.75 * 100)}%</td><td>[${ann.bbox.join(', ')}]</td>
       </tr>`).join('');
 
     const fieldRows = fields.map((f, i) => {
@@ -1503,7 +1641,7 @@ function DraftPanel({
       doctorNote:     d.doctorNote,
       detections: sample.annotations.map(a => ({
         label:      catShort(a.categoryId, a.category),
-        confidence: `${Math.round(mockScore(a.id) * 100)}%`,
+        confidence: `${Math.round(0.75 * 100)}%`,
       })),
     });
   };
@@ -1634,25 +1772,49 @@ function DraftPanel({
           )}
           {/* Edit / Preview toggle + preview actions — all in one row */}
           <div className="ml-auto flex items-center gap-1 shrink-0">
-            {/* Save draft button */}
+            {/* Save draft button — PATCH fields to DB */}
             <button
-              onClick={() => {
-                const blob = new Blob(
-                  [JSON.stringify({ fields, approved, generatedAt: new Date().toISOString() }, null, 2)],
-                  { type: 'application/json' }
-                );
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `nhap-bao-cao-${episodeId.slice(0, 8)}-${Date.now()}.json`;
-                a.click();
-                URL.revokeObjectURL(url);
+              disabled={isSaving || approved || !restoredDraftId}
+              onClick={async () => {
+                if (!restoredDraftId) {
+                  setSaveMsg({ type: 'err', text: 'Chưa có nháp để lưu. Hãy tạo báo cáo trước.' });
+                  setTimeout(() => setSaveMsg(null), 3000);
+                  return;
+                }
+                setIsSaving(true);
+                setSaveMsg(null);
+                const dbFields = fields.map(f => ({ field_id: f.key, label: f.label, value: f.value, source: f.source, status: f.status }));
+                const result = await saveDraftFields({ draft_id: restoredDraftId, fields: dbFields });
+                setIsSaving(false);
+                if (result.ok) {
+                  setSaveMsg({ type: 'ok', text: 'Đã lưu' });
+                } else {
+                  setSaveMsg({ type: 'err', text: result.error ?? 'Lưu thất bại' });
+                }
+                setTimeout(() => setSaveMsg(null), 3000);
               }}
-              title="Lưu nháp (JSON)"
-              className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[10px] border border-border text-text-secondary hover:bg-background-secondary transition-colors"
+              title={restoredDraftId ? 'Lưu nháp vào cơ sở dữ liệu' : 'Chưa có nháp để lưu'}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-sm text-[10px] border transition-colors ${
+                isSaving
+                  ? 'border-border text-text-tertiary cursor-wait'
+                  : !restoredDraftId || approved
+                  ? 'border-border text-text-tertiary cursor-not-allowed opacity-50'
+                  : 'border-border text-text-secondary hover:bg-background-secondary'
+              }`}
             >
-              <Save className="w-3 h-3" />Lưu
+              {isSaving
+                ? <><Loader2 className="w-3 h-3 animate-spin" />Đang lưu…</>
+                : <><Save className="w-3 h-3" />Lưu</>}
             </button>
+            {saveMsg && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-sm font-medium ${
+                saveMsg.type === 'ok'
+                  ? 'text-semantic-success bg-semantic-success/10'
+                  : 'text-semantic-error bg-semantic-error/10'
+              }`}>
+                {saveMsg.text}
+              </span>
+            )}
 
             {/* Download PDF button — jsPDF direct download, no print dialog */}
             <button
@@ -1804,10 +1966,18 @@ function DraftPanel({
               </button>
             )}
             <button
-              onClick={() => setApproved(true)}
-              disabled={!canFinalize}
+              onClick={() => {
+                if (!restoredDraftId) {
+                  setSaveMsg({ type: 'err', text: 'Chưa có nháp để xác nhận.' });
+                  setTimeout(() => setSaveMsg(null), 3000);
+                  return;
+                }
+                setSignatureName('');
+                setShowApproveModal(true);
+              }}
+              disabled={!canFinalize || isSaving}
               className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-sm font-semibold ${
-                canFinalize
+                canFinalize && !isSaving
                   ? 'bg-semantic-success text-white hover:opacity-90'
                   : 'bg-background-secondary text-text-tertiary border border-border cursor-not-allowed'
               }`}
@@ -1823,6 +1993,78 @@ function DraftPanel({
           </div>
         )}
       </div>
+
+      {/* Inline approve modal — replaces window.prompt() which is blocked in sandboxed iframe */}
+      {showApproveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-surface border border-border rounded-md shadow-xl w-full max-w-sm mx-4 p-5">
+            <h3 className="text-sm font-semibold text-text-primary mb-1">Xác nhận bản chính thức</h3>
+            <p className="text-xs text-text-secondary mb-4">
+              Nhập họ tên đầy đủ của bác sĩ để ký xác nhận. Thao tác này không thể hoàn tác.
+            </p>
+            <label className="block text-xs text-text-secondary mb-1.5 font-medium">Họ và tên bác sĩ</label>
+            <input
+              type="text"
+              autoFocus
+              value={signatureName}
+              onChange={e => setSignatureName(e.target.value)}
+              onKeyDown={async e => {
+                if (e.key === 'Enter' && signatureName.trim()) {
+                  e.preventDefault();
+                  setShowApproveModal(false);
+                  setIsSaving(true);
+                  setSaveMsg(null);
+                  const result = await approveDraft({ draft_id: restoredDraftId!, signature_name: signatureName.trim() });
+                  setIsSaving(false);
+                  if (result.ok) {
+                    setApproved(true);
+                    invalidateDraftCache(episodeId);
+                    setSaveMsg({ type: 'ok', text: 'Đã xác nhận & lưu bản chính thức' });
+                  } else {
+                    setSaveMsg({ type: 'err', text: result.error ?? 'Xác nhận thất bại' });
+                  }
+                  setTimeout(() => setSaveMsg(null), 5000);
+                }
+              }}
+              placeholder="VD: BS. Nguyễn Văn A"
+              className="w-full px-3 py-2 text-sm border border-border rounded-sm bg-background-secondary text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-brand-primary mb-4"
+            />
+            <div className="flex items-center gap-2 justify-end">
+              <button
+                onClick={() => setShowApproveModal(false)}
+                className="px-3 py-1.5 text-xs border border-border rounded-sm text-text-secondary hover:bg-background-secondary"
+              >
+                Hủy
+              </button>
+              <button
+                disabled={!signatureName.trim() || isSaving}
+                onClick={async () => {
+                  setShowApproveModal(false);
+                  setIsSaving(true);
+                  setSaveMsg(null);
+                  const result = await approveDraft({ draft_id: restoredDraftId!, signature_name: signatureName.trim() });
+                  setIsSaving(false);
+                  if (result.ok) {
+                    setApproved(true);
+                    invalidateDraftCache(episodeId);
+                    setSaveMsg({ type: 'ok', text: 'Đã xác nhận & lưu bản chính thức' });
+                  } else {
+                    setSaveMsg({ type: 'err', text: result.error ?? 'Xác nhận thất bại' });
+                  }
+                  setTimeout(() => setSaveMsg(null), 5000);
+                }}
+                className={`px-3 py-1.5 text-xs rounded-sm font-semibold ${
+                  signatureName.trim() && !isSaving
+                    ? 'bg-semantic-success text-white hover:opacity-90'
+                    : 'bg-background-secondary text-text-tertiary cursor-not-allowed'
+                }`}
+              >
+                {isSaving ? <span className="flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" />Đang lưu…</span> : 'Xác nhận & Lưu'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1857,7 +2099,17 @@ function CaseDetail() {
   const [liveCitations, setLiveCitations] = useState<Citation[]>([]);
   const [liveCitationAnchors, setLiveCitationAnchors] = useState<CitationAnchor[]>([]);
   const [highlightedFieldKey, setHighlightedFieldKey] = useState<string | null>(null);
+  const [xrayUrl, setXrayUrl] = useState<string | null>(null);
   const focusRestoreTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Fetch episode X-ray image URL from Storage
+  useEffect(() => {
+    let cancelled = false;
+    getEpisodeImageUrl(id).then(({ url }) => {
+      if (!cancelled) setXrayUrl(url);
+    });
+    return () => { cancelled = true; };
+  }, [id]);
 
   // Fetch episode detail from API
   useEffect(() => {
@@ -1892,11 +2144,9 @@ function CaseDetail() {
     fetchEpisode();
   }, [id]);
 
-  // Map episode_id to corresponding PCXR sample
-  // In production: fetch from Supabase based on episode_id
-  const sampleIdx = EPISODE_TO_SAMPLE[id] ?? 0;
-  const sample = PCXR_SAMPLES[sampleIdx];
-  const findingIds = sample.annotations.map(annotation => String(annotation.id));
+  // Build a real sample from the fetched image URL (no mock annotations)
+  const sample: PcxrSample = { idx: 0, key: id, imageId: id, imgSrc: xrayUrl ?? '', dim: 1280, annotations: [] };
+  const findingIds: string[] = [];
 
   // Auto-switch panel width on step change unless user overrode
   useEffect(() => {
@@ -1968,7 +2218,7 @@ function CaseDetail() {
     }
 
     if (action.type === 'focus_finding') {
-      const resolvedFindingIndex = resolveFindingIndex(sample, action.findingId);
+      const resolvedFindingIndex = resolveFindingIndex(sample.annotations, action.findingId);
       if (resolvedFindingIndex !== null) {
         setFocusedFinding(resolvedFindingIndex, action.ttlMs ?? 5000);
       }
@@ -2043,6 +2293,7 @@ function CaseDetail() {
             widthPct={PANEL_WIDTHS[panelMode]}
             sample={sample}
             caseInfo={caseInfo}
+            episodeId={id}
             hoveredIdx={hoveredIdx}
             onHoverIdx={setHoveredIdx}
             focusedIdx={focusedIdx}

@@ -6,6 +6,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
+import fs from 'fs/promises';
 import { supabase } from '../supabase/client.js';
 import { pdfParser } from './pdf-parser.js';
 import { chunker } from './chunker.js';
@@ -21,6 +22,30 @@ import {
 } from './types.js';
 import { logger } from '../utils/logger.js';
 import crypto from 'crypto';
+
+const STORAGE_BUCKET = 'knowledge-docs';
+
+async function uploadPdfToStorage(localPath: string, documentId: string): Promise<string | null> {
+  try {
+    const fileBuffer = await fs.readFile(localPath);
+    const storagePath = `documents/${documentId}.pdf`;
+    const { error } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .upload(storagePath, fileBuffer, {
+        contentType: 'application/pdf',
+        upsert: true,
+      });
+    if (error) {
+      logger.warn('[Storage] PDF upload failed', { documentId, error: error.message });
+      return null;
+    }
+    logger.info('[Storage] PDF uploaded', { documentId, storagePath });
+    return storagePath;
+  } catch (err) {
+    logger.warn('[Storage] PDF upload exception', { documentId, err });
+    return null;
+  }
+}
 
 // ============================================================================
 // Ingestion Service Class
@@ -118,6 +143,19 @@ export class IngestionService {
       // Step 2: Insert document record
       logger.info('Step 2/5: Creating document record...');
       const documentId = await this.upsertDocumentRecord(parsed, contentHash, opts);
+
+      // Upload original PDF to Supabase Storage (best-effort, non-blocking)
+      const storagePath = await uploadPdfToStorage(filePath, documentId);
+      if (storagePath) {
+        const { data: docRow } = await supabase
+          .from('documents')
+          .select('metadata')
+          .eq('id', documentId)
+          .single();
+        const mergedMeta = { ...(docRow?.metadata as Record<string, unknown> ?? {}), storage_path: storagePath };
+        await supabase.from('documents').update({ metadata: mergedMeta }).eq('id', documentId);
+      }
+
       await this.reportProgress(opts.progressCallback, {
         status: 'chunking',
         progress: 25,

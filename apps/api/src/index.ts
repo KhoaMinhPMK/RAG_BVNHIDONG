@@ -26,6 +26,7 @@ import caeRoutes from './routes/cae.js';
 import aiRunsRoutes from './routes/ai-runs.js';
 import sessionsRoutes from './routes/sessions.js';
 import reportsRoutes from './routes/reports.js';
+import cxrRoutes from './routes/cxr.js';
 
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
@@ -175,6 +176,7 @@ app.use('/api/ai-runs', aiRunsRoutes);
 app.use('/api/drafts', aiRunsRoutes);  // draft approval sub-routes
 app.use('/api/sessions', sessionsRoutes);
 app.use('/api/reports', reportsRoutes);
+app.use('/api/cxr', cxrRoutes);
 
 // ============================================================================
 // Error Handler

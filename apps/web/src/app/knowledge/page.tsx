@@ -1,10 +1,11 @@
 ﻿'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Upload, BookOpen, Check, Clock, AlertTriangle, Search, Loader2,
   FileText, Layers, Database, Inbox, Wifi, WifiOff, X, Trash2,
-  ChevronDown, Plus, RefreshCw, CheckCircle2,
+  ChevronDown, Plus, RefreshCw, CheckCircle2, Eye,
 } from 'lucide-react';
 import * as apiClient from '@/lib/api/client';
 
@@ -394,6 +395,7 @@ function UploadModal({ onClose, onSuccess }: UploadModalProps) {
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function KnowledgePage() {
+  const router = useRouter();
   const [docs, setDocs] = useState<ApiDocument[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -407,11 +409,11 @@ export default function KnowledgePage() {
     setLoading(true);
     setError(null);
     apiClient.getDocuments()
-      .then((res) => {
-        if (res.success) {
+      .then((res: { success: boolean; documents?: ApiDocument[]; total?: number } | null) => {
+        if (res?.success) {
           setDocs(res.documents ?? []);
           setTotal(res.total ?? 0);
-        } else {
+        } else if (res && !res.success) {
           setError('Không thể tải danh sách tài liệu');
         }
       })
@@ -559,9 +561,9 @@ export default function KnowledgePage() {
           </div>
 
           {/* Column headers */}
-          <div className="grid grid-cols-[1fr_110px_64px_56px_90px_80px_36px] gap-2 px-4 py-2 border-b border-border bg-background-secondary">
-            {['Tên tài liệu', 'Nguồn', 'Phiên bản', 'Chunks', 'Ngày hiệu lực', 'Trạng thái', ''].map((h) => (
-              <span key={h} className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wider truncate">
+          <div className="grid grid-cols-[1fr_110px_64px_56px_90px_80px_36px_36px] gap-2 px-4 py-2 border-b border-border bg-background-secondary">
+            {['Tên tài liệu', 'Nguồn', 'Phiên bản', 'Chunks', 'Ngày hiệu lực', 'Trạng thái', '', ''].map((h, i) => (
+              <span key={i} className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wider truncate">
                 {h}
               </span>
             ))}
@@ -604,8 +606,9 @@ export default function KnowledgePage() {
               return (
                 <div
                   key={doc.id}
-                  className={`grid grid-cols-[1fr_110px_64px_56px_90px_80px_36px] gap-2 px-4 py-3 transition-colors items-center group
-                    ${isDeleting ? 'opacity-40' : 'hover:bg-background-secondary'}`}
+                  onClick={() => !isDeleting && router.push(`/knowledge/${doc.id}`)}
+                  className={`grid grid-cols-[1fr_110px_64px_56px_90px_80px_36px_36px] gap-2 px-4 py-3 transition-colors items-center group cursor-pointer
+                    ${isDeleting ? 'opacity-40 cursor-default' : 'hover:bg-background-secondary'}`}
                 >
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-text-primary truncate group-hover:text-brand-primary transition-colors">
@@ -629,9 +632,17 @@ export default function KnowledgePage() {
                     <Icon className={`w-3 h-3 ${s.color}`} />
                     <span className={`text-[10px] font-medium ${s.color}`}>{s.label}</span>
                   </div>
+                  {/* View */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); router.push(`/knowledge/${doc.id}`); }}
+                    className="flex items-center justify-center w-7 h-7 rounded-sm text-text-tertiary hover:text-brand-primary hover:bg-brand-primary/10 transition-colors opacity-0 group-hover:opacity-100"
+                    title="Xem tài liệu"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                  </button>
                   {/* Delete */}
                   <button
-                    onClick={() => handleDelete(doc.id, doc.title)}
+                    onClick={(e) => { e.stopPropagation(); handleDelete(doc.id, doc.title); }}
                     disabled={isDeleting}
                     className="flex items-center justify-center w-7 h-7 rounded-sm text-text-tertiary hover:text-semantic-error hover:bg-semantic-error/10 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-40"
                     title="Xóa tài liệu"

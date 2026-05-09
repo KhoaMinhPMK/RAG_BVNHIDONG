@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import multer from 'multer';
+import FormData from 'form-data';
 import { supabase } from '../lib/supabase/client.js';
 import { authenticateJWT } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/rbac.js';
@@ -14,6 +16,11 @@ import type {
 } from '../types/api.js';
 
 const router = Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+
+function getCxrUrl(): string {
+  return process.env.CXR_SERVICE_URL ?? '';
+}
 
 /**
  * GET /api/episodes
@@ -203,43 +210,48 @@ router.get(
 
 /**
  * POST /api/episodes
- * Create new episode
+ * Create new episode (multipart/form-data with optional image field)
  */
 router.post(
   '/episodes',
   authenticateJWT,
   requirePermission('episodes:create'),
+  upload.single('image'),
   async (req: Request, res: Response) => {
     try {
-      const body = req.body as CreateEpisodeRequest;
+      // Support both multipart form fields and JSON body
+      const body = req.body as Record<string, string>;
 
-      // Validate required fields
-      if (!body.patient_ref || !body.age || !body.gender || !body.admission_date) {
+      const patient_ref = body.patient_ref;
+      const admission_date = body.date || body.admission_date;
+
+      if (!patient_ref || !admission_date) {
         return res.status(400).json({
           success: false,
           error: {
             code: 'INVALID_INPUT',
-            message: 'Missing required fields: patient_ref, age, gender, admission_date',
+            message: 'Missing required fields: patient_ref, date',
           },
         });
       }
 
       logger.info('Creating new episode', {
         userId: req.userId,
-        patientRef: body.patient_ref,
+        patientRef: patient_ref,
+        hasImage: !!req.file,
       });
 
-      const { data, error } = await supabase
+      const { data: episodeRow, error: episodeErr } = await supabase
         .from('episodes')
         .insert({
-          patient_id: body.patient_ref, // Use patient_ref as patient_id
-          patient_ref: body.patient_ref,
-          age: body.age,
-          gender: body.gender,
-          admission_date: body.admission_date,
-          chief_complaint: body.chief_complaint,
-          vital_signs: body.vital_signs,
-          lab_results: body.lab_results,
+          patient_id: patient_ref,
+          patient_ref,
+          age: body.age || null,
+          gender: body.gender || null,
+          admission_date,
+          chief_complaint: body.symptoms || null,
+          vital_signs: body.spo2 ? { spo2: body.spo2 } : null,
+          lab_results: body.crp ? { crp: body.crp } : null,
           status: 'pending_detection',
           findings: [],
           created_by: req.userId,
@@ -247,50 +259,159 @@ router.post(
         .select()
         .single();
 
-      if (error) {
-        logger.error('Failed to create episode', { error: error.message });
+      if (episodeErr || !episodeRow) {
+        logger.error('Failed to create episode', { error: episodeErr?.message });
         return res.status(500).json({
           success: false,
-          error: {
-            code: 'INTERNAL_ERROR',
-            message: 'Failed to create episode',
-            details: error.message,
-          },
+          error: { code: 'INTERNAL_ERROR', message: 'Failed to create episode', details: episodeErr?.message },
+        });
+      }
+
+      const episodeId: string = episodeRow.id;
+
+      // ─── Upload X-ray image to Storage if provided ─────────────────────────
+      let imagePath: string | null = null;
+      if (req.file) {
+        const ext = req.file.originalname.split('.').pop() ?? 'png';
+        const storagePath = `episodes/${episodeId}/${Date.now()}.${ext}`;
+
+        const { error: uploadErr } = await supabase.storage
+          .from('xray-images')
+          .upload(storagePath, req.file.buffer, {
+            contentType: req.file.mimetype,
+            upsert: false,
+          });
+
+        if (uploadErr) {
+          logger.error('[Episodes] Image upload failed', { error: uploadErr.message, episodeId });
+        } else {
+          imagePath = storagePath;
+          await supabase.from('images').insert({
+            episode_id: episodeId,
+            storage_path: storagePath,
+            file_name: req.file.originalname,
+            file_size: req.file.size,
+            mime_type: req.file.mimetype,
+          });
+          logger.info('[Episodes] Image uploaded', { episodeId, storagePath });
+        }
+      }
+
+      // ─── Trigger CXR analysis asynchronously ───────────────────────────────
+      if (req.file && imagePath && getCxrUrl()) {
+        setImmediate(async () => {
+          let resultId: string | null = null;
+          try {
+            const { data: inserted } = await supabase
+              .from('detection_results')
+              .upsert({ episode_id: episodeId, status: 'processing', progress: 0 }, { onConflict: 'episode_id' })
+              .select('result_id')
+              .single();
+            resultId = inserted?.result_id ?? null;
+
+            const form = new FormData();
+            form.append('file', req.file!.buffer, {
+              filename: req.file!.originalname,
+              contentType: req.file!.mimetype,
+            });
+            const formBuffer = form.getBuffer();
+
+            const cxrRes = await fetch(`${getCxrUrl()}/analyze`, {
+              method: 'POST',
+              body: formBuffer,
+              headers: {
+                'Content-Type': `multipart/form-data; boundary=${form.getBoundary()}`,
+                'Content-Length': String(formBuffer.length),
+              },
+              signal: AbortSignal.timeout(90_000),
+            });
+
+            if (!cxrRes.ok) throw new Error(`CXR HTTP ${cxrRes.status}`);
+
+            const cxrData = await cxrRes.json() as { top_finding: string; predictions: unknown[] };
+            await supabase.from('detection_results')
+              .upsert({
+                episode_id: episodeId,
+                status: 'completed',
+                progress: 100,
+                results: { top_finding: cxrData.top_finding, predictions: cxrData.predictions },
+              }, { onConflict: 'episode_id' });
+
+            logger.info('[Episodes] CXR auto-analysis complete', { episodeId, top: cxrData.top_finding });
+          } catch (err) {
+            logger.error('[Episodes] CXR auto-analysis failed', { episodeId, error: (err as Error).message });
+            await supabase.from('detection_results')
+              .upsert({
+                episode_id: episodeId,
+                status: 'failed',
+                progress: 0,
+                error_message: (err as Error).message,
+              }, { onConflict: 'episode_id' });
+          }
         });
       }
 
       const episode: Episode = {
-        episode_id: data.id, // Database uses 'id' column
-        patient_ref: data.patient_ref,
-        age: data.age,
-        gender: data.gender,
-        admission_date: data.admission_date,
-        status: data.status,
-        findings: data.findings || [],
-        chief_complaint: data.chief_complaint,
-        vital_signs: data.vital_signs,
-        lab_results: data.lab_results,
-        created_by: data.created_by,
-        created_at: data.created_at,
-        updated_at: data.updated_at,
+        episode_id: episodeId,
+        patient_ref: episodeRow.patient_ref,
+        age: episodeRow.age,
+        gender: episodeRow.gender,
+        admission_date: episodeRow.admission_date,
+        status: episodeRow.status,
+        findings: episodeRow.findings || [],
+        chief_complaint: episodeRow.chief_complaint,
+        vital_signs: episodeRow.vital_signs,
+        lab_results: episodeRow.lab_results,
+        created_by: episodeRow.created_by,
+        created_at: episodeRow.created_at,
+        updated_at: episodeRow.updated_at,
       };
 
-      logger.info('Episode created successfully', { episodeId: episode.episode_id });
+      logger.info('Episode created successfully', { episodeId, hasImage: !!imagePath });
 
-      res.status(201).json({
-        success: true,
-        episode,
-      });
+      return res.status(201).json({ success: true, episode, has_image: !!imagePath });
     } catch (error) {
       logger.error('Create episode error', { error: (error as Error).message });
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
-        error: {
-          code: 'INTERNAL_ERROR',
-          message: 'Internal server error',
-        },
+        error: { code: 'INTERNAL_ERROR', message: 'Internal server error' },
       });
     }
+  }
+);
+
+/**
+ * GET /api/episodes/:id/image-url
+ * Get signed URL for the episode's X-ray image
+ */
+router.get(
+  '/episodes/:id/image-url',
+  authenticateJWT,
+  requirePermission('episodes:read'),
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+
+    const { data: imgRow } = await supabase
+      .from('images')
+      .select('image_id, storage_path, file_name, mime_type, uploaded_at')
+      .eq('episode_id', id)
+      .order('uploaded_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!imgRow) {
+      return res.json({ success: true, url: null, image: null });
+    }
+
+    const { data: signed, error: signErr } = await supabase.storage
+      .from('xray-images')
+      .createSignedUrl(imgRow.storage_path, 3600);
+
+    if (signErr || !signed) {
+      return res.status(500).json({ success: false, error: { message: signErr?.message || 'Failed to sign URL' } });
+    }
+
+    return res.json({ success: true, url: signed.signedUrl, image: imgRow });
   }
 );
 

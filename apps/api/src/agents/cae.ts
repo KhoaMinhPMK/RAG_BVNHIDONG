@@ -44,6 +44,7 @@ interface StreamExplainOptions extends StreamCAEOptions {
 
 interface StreamDraftOptions extends StreamCAEOptions {
   clinicalData?: Record<string, unknown>;
+  createdBy?: string;
   onDraftSaved?: (draft_id: string) => void;
 }
 
@@ -736,6 +737,7 @@ export async function streamDraft(
       template_id: templateId,
       detection,
       clinical_data: options.clinicalData,
+      created_by: options.createdBy,
     });
 
     const violations = validateDraftFields(result.fields);

@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeSubmitPrompt": [
+      {
+        "command": "node .cursor/hooks/before-submit-prompt.mjs",
+        "matcher": "UserPromptSubmit",
+        "timeout": 5
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "node .cursor/hooks/before-shell-execution.mjs",
+        "matcher": "rm -rf|rm -fr|supabase db reset|DROP DATABASE|DROP SCHEMA|dd if=|push --force|push -f",
+        "timeout": 5
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "node .cursor/hooks/protect-env-files.mjs",
+        "matcher": "Write",
+        "timeout": 5
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "node .cursor/hooks/supabase-mcp-gate.mjs",
+        "matcher": "apply_migration|execute_sql|delete_branch|reset_branch|pause_project|restore_project",
+        "timeout": 10
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "node .cursor/hooks/scan-written-secrets.mjs",
+        "matcher": "Write",
+        "timeout": 8
+      }
+    ]
+  }
+}

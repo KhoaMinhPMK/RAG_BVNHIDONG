@@ -243,6 +243,7 @@ router.post(
         clinicalData: clinical_data,
         findingIds: finding_ids,
         runId: run_id ?? undefined,
+        createdBy: userId ?? undefined,
         signal: disconnectAc.signal,
         onBlock: (block: AiRunBlock) => { collectedBlocks.push(block); },
         onContent: (text: string) => { collectedContent += text; },

@@ -12,6 +12,7 @@ import { authenticateJWT } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/rbac.js';
 import { guardrailsMiddleware } from '../middleware/guardrails.js';
 import { streamBrief, streamChat, streamExplain, streamDraft } from '../agents/cae.js';
+import type { RenderableBlock } from '../types/cae-output.js';
 import { getMiMoClient } from '../lib/mimo/client.js';
 import { logger } from '../lib/utils/logger.js';
 import { createRun, completeRun, failRun, abortRun } from '../lib/ai-runs/service.js';
@@ -55,7 +56,9 @@ router.post('/brief', authenticateJWT, async (req: Request, res: Response) => {
       findingIds: finding_ids,
       runId: run_id ?? undefined,
       signal: disconnectAc.signal,
-      onBlock: (block: AiRunBlock) => { collectedBlocks.push(block); },
+      onBlock: (block: RenderableBlock) => {
+        collectedBlocks.push(block as unknown as AiRunBlock);
+      },
       onContent: (text: string) => { collectedContent += text; },
     });
     streamFinished = true;
@@ -106,7 +109,9 @@ router.post('/chat', authenticateJWT, async (req: Request, res: Response) => {
       findingIds: finding_ids,
       runId: run_id ?? undefined,
       signal: disconnectAc.signal,
-      onBlock: (block: AiRunBlock) => { collectedBlocks.push(block); },
+      onBlock: (block: RenderableBlock) => {
+        collectedBlocks.push(block as unknown as AiRunBlock);
+      },
       onContent: (text: string) => { collectedContent += text; },
     });
     streamFinished = true;
@@ -172,7 +177,9 @@ router.post(
         findingIds: finding_ids,
         runId: run_id ?? undefined,
         signal: disconnectAc.signal,
-        onBlock: (block: AiRunBlock) => { collectedBlocks.push(block); },
+        onBlock: (block: RenderableBlock) => {
+          collectedBlocks.push(block as unknown as AiRunBlock);
+        },
         onContent: (text: string) => { collectedContent += text; },
         onCitations: (cits: unknown[]) => { collectedCitations.push(...cits); },
       });
@@ -244,7 +251,9 @@ router.post(
         findingIds: finding_ids,
         runId: run_id ?? undefined,
         signal: disconnectAc.signal,
-        onBlock: (block: AiRunBlock) => { collectedBlocks.push(block); },
+        onBlock: (block: RenderableBlock) => {
+          collectedBlocks.push(block as unknown as AiRunBlock);
+        },
         onContent: (text: string) => { collectedContent += text; },
         onCitations: (cits: unknown[]) => { collectedCitations.push(...cits); },
         onDraftSaved: (draft_id: string) => { draftRef = draft_id; },

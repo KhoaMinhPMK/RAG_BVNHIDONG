@@ -6,9 +6,20 @@
     "apps/*",
     "packages/*"
   ],
+  "scripts": {
+    "bundle-api-vercel": "esbuild apps/api/src/index.ts --bundle --packages=bundle --external:pdf-parse --external:tiktoken --platform=node --target=node20 --format=cjs --outfile=apps/web/express-bundle.cjs --log-level=warning",
+    "vercel-build": "yarn bundle-api-vercel && yarn workspace webrag-web build",
+    "dev": "yarn bundle-api-vercel && yarn workspace webrag-web dev"
+  },
   "dependencies": {
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.105.1",
     "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0",
+    "next": "^14.2.35",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   }
 }

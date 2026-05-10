@@ -1,0 +1,7 @@
+# Giảm kích thước upload CLI — build chạy trên Vercel với `yarn install`
+knowledge_base/
+apps/api/uploads/
+apps/api/dist/
+**/.next/
+**/coverage/
+.cursor/

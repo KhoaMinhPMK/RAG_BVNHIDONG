@@ -45,7 +45,7 @@ const systemInfo = [
 ];
 
 export function Sidebar({ collapsed, onToggle, forceCollapsed = false }: SidebarProps) {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? '';
   const { role, loading, user } = useAuth();
 
   function isActive(item: typeof navItems[0]) {

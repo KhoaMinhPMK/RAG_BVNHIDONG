@@ -411,9 +411,9 @@ export function CAEDock({
       summary:    row.raw_content.slice(0, 180),
       createdAt:  new Date(row.created_at).getTime(),
       status:     row.error_msg ? 'error' : 'done',
-      blocks:     row.blocks as RenderableBlock[],
+      blocks:     row.blocks as unknown as RenderableBlock[],
       content:    row.raw_content,
-      citations:  row.citations as CitationAnchor[],
+      citations:  row.citations as unknown as CitationAnchor[],
       usage:      null,
       error:      row.error_msg,
     };

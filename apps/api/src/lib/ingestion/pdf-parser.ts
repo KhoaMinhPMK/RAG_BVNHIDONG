@@ -11,10 +11,7 @@ import matter from 'gray-matter';
 import crypto from 'crypto';
 import { ParsedDocument, DocumentMetadata, ParsedSection } from './types.js';
 import { logger } from '../utils/logger.js';
-import { createRequire } from 'module';
-
-const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
+import pdfParse from 'pdf-parse';
 
 // Helper to parse PDF buffer (pdf-parse v1.1.1 API)
 async function parsePDFBuffer(buffer: Buffer): Promise<any> {

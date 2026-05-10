@@ -63,7 +63,10 @@ router.get('/latest', authenticateJWT, async (req: Request, res: Response) => {
 // ── GET /api/ai-runs/:run_id ────────────────────────────────────────────────
 
 router.get('/:run_id', authenticateJWT, async (req: Request, res: Response) => {
-  const { run_id } = req.params;
+  const run_id = typeof req.params.run_id === 'string' ? req.params.run_id : req.params.run_id?.[0];
+  if (!run_id) {
+    return res.status(400).json({ success: false, error: 'run_id required' });
+  }
 
   const run = await getRunById(run_id);
   if (!run) {
@@ -76,7 +79,10 @@ router.get('/:run_id', authenticateJWT, async (req: Request, res: Response) => {
 // ── POST /api/ai-runs/:run_id/abort ────────────────────────────────────────
 
 router.post('/:run_id/abort', authenticateJWT, async (req: Request, res: Response) => {
-  const { run_id } = req.params;
+  const run_id = typeof req.params.run_id === 'string' ? req.params.run_id : req.params.run_id?.[0];
+  if (!run_id) {
+    return res.status(400).json({ success: false, error: 'run_id required' });
+  }
   await abortRun(run_id);
   return res.json({ success: true });
 });
@@ -131,7 +137,11 @@ router.get('/drafts/:draft_id', authenticateJWT, async (req: Request, res: Respo
 // ── POST /api/drafts/:draft_id/approve ─────────────────────────────────────
 
 router.post('/drafts/:draft_id/approve', authenticateJWT, async (req: Request, res: Response) => {
-  const { draft_id } = req.params;
+  const draft_id =
+    typeof req.params.draft_id === 'string' ? req.params.draft_id : req.params.draft_id?.[0];
+  if (!draft_id) {
+    return res.status(400).json({ success: false, error: 'draft_id required' });
+  }
   const userId = req.userId;
 
   const {

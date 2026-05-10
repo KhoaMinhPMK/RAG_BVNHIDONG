@@ -5,7 +5,7 @@ import {
   AlertCircle, Bot, Brain, CheckCircle2, ChevronDown, ChevronUp,
   Loader2, MessageSquare, RefreshCw, Send, Volume2, Zap,
 } from 'lucide-react';
-import { jsonAuthHeaders } from '@/lib/api/client';
+import { getApiBaseUrl, jsonAuthHeaders } from '@/lib/api/client';
 import { BlockRenderer } from './BlockRenderer';
 import type { RenderableBlock, CitationAnchor, CAESSEEvent, DoneEvent } from '@/types/cae-output';
 
@@ -25,8 +25,6 @@ interface ChatMessage {
   blocks?: RenderableBlock[];
   citations?: CitationAnchor[];
 }
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
 
 // Default fallback for backward compatibility
 const FALLBACK_EVENT: CAESSEEvent = { type: 'content', delta: '' };
@@ -233,7 +231,7 @@ export default function CAEPanel({ episodeId, currentStep }: { episodeId: string
 
     try {
       await consumeCAESSE(
-        `${API_BASE}/api/cae/brief`,
+        `${getApiBaseUrl()}/api/cae/brief`,
         { episode_id: episodeId },
         {
           onThinking: (delta) => {
@@ -306,7 +304,7 @@ export default function CAEPanel({ episodeId, currentStep }: { episodeId: string
 
     try {
       await consumeCAESSE(
-        `${API_BASE}/api/cae/chat`,
+        `${getApiBaseUrl()}/api/cae/chat`,
         { episode_id: episodeId, messages: nextHistory },
         {
           onThinking: (delta) => {
@@ -372,7 +370,7 @@ export default function CAEPanel({ episodeId, currentStep }: { episodeId: string
     setIsTtsLoading(true);
     try {
       const headers = await jsonAuthHeaders();
-      const response = await fetch(`${API_BASE}/api/cae/tts`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/cae/tts`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ text: content.slice(0, 1500), voice: 'Mia' }),

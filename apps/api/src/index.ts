@@ -2,10 +2,6 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-// Debug: Log env vars to verify they're loaded
-console.log('DEBUG: OLLAMA_URL =', process.env.OLLAMA_URL);
-console.log('DEBUG: OLLAMA_MODEL =', process.env.OLLAMA_MODEL);
-
 import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -27,14 +23,20 @@ import aiRunsRoutes from './routes/ai-runs.js';
 
 const app: Express = express();
 const PORT = process.env.PORT || 3005;
-const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3001';
+const CORS_ORIGIN_RAW = process.env.CORS_ORIGIN || 'http://localhost:3001';
+const CORS_ORIGINS = CORS_ORIGIN_RAW.split(',').map((s) => s.trim()).filter(Boolean);
 
 // ============================================================================
 // Middleware
 // ============================================================================
 
 app.use(helmet());
-app.use(cors({ origin: CORS_ORIGIN, credentials: true }));
+app.use(
+  cors({
+    origin: CORS_ORIGINS.length === 0 ? true : CORS_ORIGINS.length === 1 ? CORS_ORIGINS[0] : CORS_ORIGINS,
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -57,9 +59,10 @@ app.use(auditMiddleware());
 let healthCache: { data: unknown; ts: number } | null = null;
 const HEALTH_CACHE_TTL = 30_000; // 30 seconds
 
-app.get('/health', async (req: Request, res: Response) => {
+async function handleHealth(_req: Request, res: Response): Promise<void> {
   if (healthCache && Date.now() - healthCache.ts < HEALTH_CACHE_TTL) {
-    return res.json(healthCache.data);
+    res.json(healthCache.data);
+    return;
   }
   const supabaseOk = await testSupabaseConnection();
 
@@ -139,7 +142,11 @@ app.get('/health', async (req: Request, res: Response) => {
   };
   healthCache = { data: payload, ts: Date.now() };
   res.json(payload);
-});
+}
+
+/** `/health` local; `/api/health` trên Vercel (serverless chỉ nhận path dưới `/api/*`). */
+app.get('/health', handleHealth);
+app.get('/api/health', handleHealth);
 
 // ============================================================================
 // API Routes
@@ -150,7 +157,7 @@ app.get('/api', (req: Request, res: Response) => {
     message: 'WebRAG API Server',
     version: '0.1.0',
     endpoints: {
-      health: 'GET /health',
+      health: 'GET /api/health (hoặc GET /health khi chạy API độc lập)',
       query: 'POST /api/query',
       explain: 'POST /api/explain',
       draft: 'POST /api/draft',
@@ -212,12 +219,17 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 // Start Server
 // ============================================================================
 
-// Only start server if not in test environment
-if (process.env.NODE_ENV !== 'test') {
+// Không listen khi: Vercel serverless, test, hoặc app được nhúng trong Next (`NEXT_RUNTIME`).
+const shouldListen =
+  process.env.VERCEL !== '1' &&
+  process.env.NODE_ENV !== 'test' &&
+  process.env.NEXT_RUNTIME === undefined;
+
+if (shouldListen) {
   app.listen(PORT, async () => {
     logger.info(`🚀 API Server running on http://localhost:${PORT}`);
     logger.info(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
-    logger.info(`🔗 CORS origin: ${CORS_ORIGIN}`);
+    logger.info(`🔗 CORS origins: ${CORS_ORIGIN_RAW}`);
 
     // Test connections on startup
     logger.info('Testing connections...');

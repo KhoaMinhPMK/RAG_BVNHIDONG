@@ -1,10 +1,5 @@
 import winston from 'winston';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 const { combine, timestamp, printf, colorize, errors } = winston.format;
 
@@ -30,8 +25,33 @@ const fileLogFormat = printf(({ level, message, timestamp, ...metadata }) => {
   return msg;
 });
 
-// Create logs directory path (relative to project root)
-const logsDir = path.join(__dirname, '..', '..', '..', 'logs');
+// Ghi file log theo cwd; trên Vercel filesystem hàm thường read-only → chỉ console.
+const logsDir = path.join(process.cwd(), 'logs');
+const onVercel = process.env.VERCEL === '1';
+
+const transports: winston.transport[] = [
+  new winston.transports.Console({
+    format: combine(colorize(), logFormat),
+  }),
+];
+
+if (!onVercel) {
+  transports.push(
+    new winston.transports.File({
+      filename: path.join(logsDir, 'server.log'),
+      format: combine(timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), fileLogFormat),
+      maxsize: 10485760,
+      maxFiles: 5,
+    }),
+    new winston.transports.File({
+      filename: path.join(logsDir, 'error.log'),
+      level: 'error',
+      format: combine(timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), fileLogFormat),
+      maxsize: 10485760,
+      maxFiles: 5,
+    })
+  );
+}
 
 // Create logger instance
 export const logger = winston.createLogger({
@@ -41,34 +61,5 @@ export const logger = winston.createLogger({
     timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     logFormat
   ),
-  transports: [
-    // Console output (with colors)
-    new winston.transports.Console({
-      format: combine(
-        colorize(),
-        logFormat
-      ),
-    }),
-    // File output - ALL logs (always enabled, even in development)
-    new winston.transports.File({
-      filename: path.join(logsDir, 'server.log'),
-      format: combine(
-        timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-        fileLogFormat
-      ),
-      maxsize: 10485760, // 10MB
-      maxFiles: 5,
-    }),
-    // File output - ERROR logs only
-    new winston.transports.File({
-      filename: path.join(logsDir, 'error.log'),
-      level: 'error',
-      format: combine(
-        timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-        fileLogFormat
-      ),
-      maxsize: 10485760, // 10MB
-      maxFiles: 5,
-    }),
-  ],
+  transports,
 });

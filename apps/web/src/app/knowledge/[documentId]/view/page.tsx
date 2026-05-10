@@ -4,13 +4,14 @@ import { Suspense, useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Loader2, AlertTriangle } from 'lucide-react';
-import { API_BASE_URL, getAuthToken } from '@/lib/api/client';
+import { getApiBaseUrl, getAuthToken } from '@/lib/api/client';
 
 function KnowledgePdfViewInner() {
   const params = useParams();
   const searchParams = useSearchParams();
-  const documentId = typeof params.documentId === 'string' ? params.documentId : '';
-  const titleHint = searchParams.get('title')?.trim() || 'Tài liệu';
+  const documentId =
+    params && typeof params.documentId === 'string' ? params.documentId : '';
+  const titleHint = searchParams?.get('title')?.trim() || 'Tài liệu';
 
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading');
   const [message, setMessage] = useState<string | null>(null);
@@ -50,7 +51,7 @@ function KnowledgePdfViewInner() {
         }
 
         const res = await fetch(
-          `${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}/source`,
+          `${getApiBaseUrl()}/api/documents/${encodeURIComponent(documentId)}/source`,
           { method: 'GET', headers: { Authorization: `Bearer ${token}` } }
         );
 

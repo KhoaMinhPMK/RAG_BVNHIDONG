@@ -152,7 +152,7 @@ function UserButton() {
 
 // ── Breadcrumb (pathname-aware) ────────────────────────────────────────────
 function BreadcrumbInner() {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? '';
   const searchParams = useSearchParams();
 
   const caseMatch = pathname.match(/^\/cases\/([^/]+)$/);

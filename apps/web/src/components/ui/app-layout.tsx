@@ -8,7 +8,7 @@ import { Sidebar } from './sidebar';
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const pathname = usePathname();
+  const pathname = usePathname() ?? '';
   const router = useRouter();
   const { loading, user } = useAuth();
 

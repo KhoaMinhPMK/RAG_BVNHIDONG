@@ -879,8 +879,9 @@ function ExplainPanel({
       setIsRestoring(true);
       try {
         const run = await getLatestAiRun(episodeId, 'explain', 480);
-        if (!cancelled && run && (run.blocks as RenderableBlock[]).length > 0) {
-          setRestoredBlocks(run.blocks as RenderableBlock[]);
+        const blocks = run?.blocks as unknown as RenderableBlock[] | undefined;
+        if (!cancelled && run && blocks && blocks.length > 0) {
+          setRestoredBlocks(blocks);
           setRestoredCitations((run.citations ?? []) as CitationAnchor[]);
           setRestoredAt(run.completed_at ?? run.created_at);
           setHasStarted(true);

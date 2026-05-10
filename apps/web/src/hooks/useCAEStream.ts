@@ -3,7 +3,7 @@
  */
 
 import { useState, useRef, useCallback } from 'react';
-import { jsonAuthHeaders } from '@/lib/api/client';
+import { getApiBaseUrl, jsonAuthHeaders } from '@/lib/api/client';
 import type { RenderableBlock, CitationAnchor, CAESSEEvent, DoneEvent, UIAction } from '@/types/cae-output';
 
 interface CAEStreamContext {
@@ -45,8 +45,6 @@ interface UseCAEStreamResult {
   abort: () => void;
   reset: () => void;
 }
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
 
 async function consumeCAESSE(
   url: string,
@@ -252,7 +250,7 @@ export function useCAEStream(): UseCAEStreamResult {
 
   const startBrief = useCallback(
     async (episodeId: string, context?: CAEStreamContext) => {
-      await startStream(`${API_BASE}/api/cae/brief`, {
+      await startStream(`${getApiBaseUrl()}/api/cae/brief`, {
         episode_id: episodeId,
         finding_ids: context?.findingIds,
       });
@@ -266,7 +264,7 @@ export function useCAEStream(): UseCAEStreamResult {
       messages: Array<{ role: 'user' | 'assistant'; content: string }>,
       context?: CAEStreamContext
     ) => {
-      await startStream(`${API_BASE}/api/cae/chat`, {
+      await startStream(`${getApiBaseUrl()}/api/cae/chat`, {
         episode_id: episodeId,
         messages,
         finding_ids: context?.findingIds,
@@ -281,7 +279,7 @@ export function useCAEStream(): UseCAEStreamResult {
       detection: CAEDetectionPayload,
       context?: CAEStreamContext & { clinicalData?: Record<string, unknown> }
     ) => {
-      await startStream(`${API_BASE}/api/cae/explain`, {
+      await startStream(`${getApiBaseUrl()}/api/cae/explain`, {
         episode_id: episodeId,
         detection,
         finding_ids: context?.findingIds,
@@ -298,7 +296,7 @@ export function useCAEStream(): UseCAEStreamResult {
       detection: CAEDetectionPayload,
       context?: CAEStreamContext & { clinicalData?: Record<string, unknown> }
     ) => {
-      await startStream(`${API_BASE}/api/cae/draft`, {
+      await startStream(`${getApiBaseUrl()}/api/cae/draft`, {
         episode_id: episodeId,
         template_id: templateId,
         detection,

@@ -5,7 +5,9 @@
  * Automatically includes JWT token from Supabase session.
  */
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
+import { getApiBaseUrl } from '@/lib/api/base-url';
+
+export { getApiBaseUrl } from '@/lib/api/base-url';
 
 // ============================================================================
 // Simple in-memory cache (avoids redundant fetches on tab switches)
@@ -112,7 +114,7 @@ async function apiCall<T>(
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+    const response = await fetch(`${getApiBaseUrl()}${endpoint}`, config);
     const data = await response.json();
 
     if (!response.ok) {
@@ -253,11 +255,11 @@ export async function generateDraft(
 }
 
 /**
- * GET /health - Health check (public)
+ * GET /api/health - Health check (public; trên Vercel API nằm dưới `/api/*`)
  */
 export async function checkHealth() {
   try {
-    const response = await fetch(`${API_BASE_URL}/health`);
+    const response = await fetch(`${getApiBaseUrl()}/api/health`);
     return await response.json();
   } catch (error) {
     return {
@@ -303,6 +305,20 @@ export interface EpisodeListResponse {
   limit: number;
 }
 
+export interface DocumentsListPayload {
+  documents: Array<{
+    id: string;
+    title: string;
+    version?: string;
+    source?: string;
+    status: string;
+    chunk_count: number;
+    effective_date?: string;
+    created_at?: string;
+  }>;
+  total: number;
+}
+
 export interface EpisodeDetailResponse {
   episode: Episode;
   images: Array<{
@@ -326,24 +342,12 @@ export interface EpisodeDetailResponse {
 /**
  * GET /api/documents - List knowledge base documents (cached 2 min)
  */
-export async function getDocuments() {
+export async function getDocuments(): Promise<ApiResponse<DocumentsListPayload>> {
   const key = 'documents_list';
-  const cached = cacheGet<Awaited<ReturnType<typeof apiCall>>>(key, 2 * 60_000);
-  if (cached) return cached as Awaited<ReturnType<typeof getDocuments>>;
-  const result = await apiCall<{
-    documents: Array<{
-      id: string;
-      title: string;
-      version?: string;
-      source?: string;
-      status: string;
-      chunk_count: number;
-      effective_date?: string;
-      created_at?: string;
-    }>;
-    total: number;
-  }>('/api/documents', { method: 'GET' });
-  if (result) cacheSet(key, result);
+  const cached = cacheGet<ApiResponse<DocumentsListPayload>>(key, 2 * 60_000);
+  if (cached) return cached;
+  const result = await apiCall<DocumentsListPayload>('/api/documents', { method: 'GET' });
+  if (result.success) cacheSet(key, result);
   return result;
 }
 
@@ -370,7 +374,7 @@ export async function uploadDocument(params: {
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/documents/upload`, {
+    const response = await fetch(`${getApiBaseUrl()}/api/documents/upload`, {
       method: 'POST',
       headers,
       body: formData,
@@ -437,11 +441,11 @@ export async function deleteDocument(id: string) {
 }
 
 /**
- * GET /health - Full system health including LLM + embedding status
+ * GET /api/health - Full system health including LLM + embedding status
  */
 export async function getSystemHealth() {
   try {
-    const response = await fetch(`${API_BASE_URL}/health`);
+    const response = await fetch(`${getApiBaseUrl()}/api/health`);
     const data = await response.json();
     return data as {
       success: boolean;
@@ -491,12 +495,14 @@ export async function getEpisodes(params?: {
 /**
  * GET /api/episodes/:id - Get episode detail (cached 5 min)
  */
-export async function getEpisodeDetail(episodeId: string) {
+export async function getEpisodeDetail(
+  episodeId: string
+): Promise<ApiResponse<EpisodeDetailResponse>> {
   const key = `episode_${episodeId}`;
-  const cached = cacheGet<EpisodeDetailResponse>(key, 5 * 60_000);
+  const cached = cacheGet<ApiResponse<EpisodeDetailResponse>>(key, 5 * 60_000);
   if (cached) return cached;
   const result = await apiCall<EpisodeDetailResponse>(`/api/episodes/${episodeId}`, { method: 'GET' });
-  if (result) cacheSet(key, result);
+  if (result.success) cacheSet(key, result);
   return result;
 }
 

@@ -28,6 +28,8 @@ build/
 dist/
 .next/
 out/
+apps/web/express-bundle.cjs
+apps/web/express-bundle.mjs
 
 # Environment variables - CRITICAL: Never commit these
 .env
@@ -101,3 +103,4 @@ checkpoints/
 PHASE*.md
 *phase*_implementation_report.md
 *phase*_summary.md
+.vercel

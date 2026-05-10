@@ -27,11 +27,11 @@ function getKnowledgePdfViewLabel(pathname: string, titleParam: string | null): 
 }
 
 export function ContextBar() {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? '';
   const searchParams = useSearchParams();
 
-  const caseLabel = getCaseLabel(pathname, searchParams.get('step'));
-  const knowledgePdf = getKnowledgePdfViewLabel(pathname, searchParams.get('title'));
+  const caseLabel = getCaseLabel(pathname, searchParams?.get('step') ?? null);
+  const knowledgePdf = getKnowledgePdfViewLabel(pathname, searchParams?.get('title') ?? null);
   const page = caseLabel ?? knowledgePdf ?? pageLabels[pathname] ?? { title: pathname, description: '' };
 
   return (

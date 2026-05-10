@@ -233,16 +233,19 @@ QUY TẮC BẮT BUỘC:
           const haystack = `${document.title ?? ''}\n${chunk.content ?? ''}`.toLowerCase();
           const score = keywords.reduce((total, keyword) => total + (haystack.includes(keyword) ? 1 : 0), 0);
 
-          return {
+          const match: GuidelineMatch = {
             document_id: chunk.document_id,
             title: document.title || 'Tài liệu tham khảo',
             version: document.version || 'v1.0',
             content: chunk.content || '',
             effective_date: document.effective_date || new Date().toISOString().slice(0, 10),
             status: document.status || 'active',
-            source: document.source,
+            ...(document.source != null && String(document.source).length > 0
+              ? { source: String(document.source) }
+              : {}),
             similarity: score / keywords.length,
-          } satisfies GuidelineMatch;
+          };
+          return match;
         })
         .filter((match): match is GuidelineMatch => match !== null)
         .sort((left, right) => right.similarity - left.similarity);
